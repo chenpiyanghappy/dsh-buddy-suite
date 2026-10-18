@@ -2,7 +2,7 @@
   "name": "dsh-buddy-suite",
   "displayName": "DSH Buddy Suite",
   "description": "把 WorkBuddy 国内版账号的「模型接入」与「每日签到」合成一个插件：自动签到所有本机账号，同时把 WorkBuddy 模型接进 DeepSeek Harness — WorkBuddy CN models plus automatic daily check-in in one plugin.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "chenpiyang",
   "keywords": [
     "dsh-plugin",
@@ -13,12 +13,23 @@
     "check-in"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chenpiyanghappy/dsh-buddy-suite.git"
+  },
+  "homepage": "https://github.com/chenpiyanghappy/dsh-buddy-suite#readme",
+  "bugs": {
+    "url": "https://github.com/chenpiyanghappy/dsh-buddy-suite/issues"
+  },
   "type": "module",
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
   },
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
+  "bin": {
+    "dsh-buddy-suite": "lib/bin.js"
+  },
   "exports": {
     ".": {
       "types": "./lib/index.d.ts",
@@ -32,13 +43,16 @@
     "lib",
     "cordis.patch.yml",
     "README.md",
+    "README.en.md",
+    "KNOWN-ISSUES.md",
     "LICENSE"
   ],
   "scripts": {
     "build": "tsdown",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.client.json",
-    "verify": "node scripts/verify-bundle.mjs && node scripts/verify-client.mjs",
+    "verify": "node scripts/verify-bundle.mjs && node scripts/verify-client.mjs && node scripts/verify-copy.mjs",
+    "prepack": "tsdown",
     "check": "pnpm run typecheck && pnpm run test && pnpm run build && pnpm run verify",
     "check:offline": "pnpm run typecheck && node run-vitest.mjs && pnpm run build && pnpm run verify"
   },

@@ -10,8 +10,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_PROBE_PATH, WORKBUDDY_STATUS_PATH, isWorkBuddySignedOutReasonCode } from '../status-paths.ts'
 import type { WorkBuddyWebCreditExpiry } from '../status-paths.ts'
-import type { WorkBuddySignedOutReasonCode, WorkBuddyWebModelBadge, WorkBuddyWebProbeSection, WorkBuddyWebStatus, WorkBuddyWebVisibilitySection } from '../status-paths.ts'
+import type { WorkBuddySignedOutReasonCode, WorkBuddyWebModelBadge, WorkBuddyWebProbeModel, WorkBuddyWebProbeSection, WorkBuddyWebStatus, WorkBuddyWebUiPreferences, WorkBuddyWebVisibilitySection } from '../status-paths.ts'
 import { isWorkBuddyWebStatus } from './status-document.ts'
+import { rankedCandidates, probeChipText } from './probe-rows.ts'
 import type { WorkBuddySettingsKey } from './locales.ts'
 
 /** Localized copy injected by the browser-plugin registration. */
@@ -54,9 +55,16 @@ export interface WorkBuddyCardVariant {
   creditPrefix: string
 }
 
-/** CN WorkBuddy; the plugin's long-standing card and default. */
+/**
+ * CN WorkBuddy.
+ *
+ * `id` must match the provider id this bundle registers (`variants.ts`), not
+ * the bare `workbuddy` that dsh-workbuddy-connect owns: the composer's control
+ * picks a card by looking the selected provider up in `CARD_VARIANTS`, so a
+ * colliding id would route this card at the other plugin's routes.
+ */
 export const CN_CARD_VARIANT: WorkBuddyCardVariant = {
-  id: 'workbuddy',
+  id: 'workbuddy-suite',
   titleKey: 'title',
   introKey: 'intro',
   signedOutKey: 'signedOutHint',
@@ -69,7 +77,7 @@ export const CN_CARD_VARIANT: WorkBuddyCardVariant = {
 
 /** International WorkBuddy AI. */
 export const AI_CARD_VARIANT: WorkBuddyCardVariant = {
-  id: 'workbuddy-ai',
+  id: 'workbuddy-ai-suite',
   titleKey: 'titleAI',
   introKey: 'introAI',
   signedOutKey: 'signedOutHintAI',
@@ -228,6 +236,28 @@ const bodyStyle: CSSProperties = { margin: 0, fontSize: 14, lineHeight: '22px', 
 const rowStyle: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }
 const statusStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 9, fontSize: 15, fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }
 const buttonStyle: CSSProperties = { boxSizing: 'border-box', minHeight: 34, padding: '6px 14px', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 18, background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', font: 'inherit', fontSize: 14, cursor: 'pointer' }
+/**
+ * A quieter action, for rows whose outcome is already settled.
+ *
+ * Used where pressing the button again is unlikely to change anything but
+ * should still be possible — the probe panel's rows that reported "not
+ * adjustable". Rendering those with the primary weight made a list of dead
+ * ends read as a list of things to do.
+ *
+ * It keeps a *visible* border on purpose. An earlier version made both the
+ * background and the border transparent, which removed the button from the
+ * row entirely as far as the eye was concerned — a user asked "where did the
+ * buttons go?", reasonably, since the control was still there and still
+ * clickable but looked like plain text. De-emphasis has to stop short of
+ * erasure: dimmer text and no fill, but a real outline.
+ */
+const secondaryButtonStyle: CSSProperties = {
+  ...buttonStyle,
+  background: 'transparent',
+  border: '1px solid var(--dsw-alias-border-l2)',
+  color: 'var(--dsw-alias-label-secondary, #bdbdbd)',
+  fontSize: 13,
+}
 const errorStyle: CSSProperties = { ...bodyStyle, color: 'var(--dsw-alias-state-error-primary)' }
 /*
  * Expiry banner. Reads as an advisory, not an error: the account works fine,
@@ -269,6 +299,27 @@ const modelBadgeChipStyle: CSSProperties = {
 }
 
 /**
+ * The chip used for a detection outcome that is *not* a set of verified levels.
+ *
+ * Three results share this row, and only one of them is a success. A verified
+ * level list keeps the green chip; "this model cannot be adjusted" is a settled
+ * but neutral finding, and "detection did not complete" is unresolved. Painting
+ * all three green made a model with no selectable levels look identical to one
+ * with verified ones, which is exactly the confusion the wording fix targets.
+ * Neutral and warning use their own theme tokens, so both follow light/dark.
+ */
+const probeNeutralChipStyle: CSSProperties = {
+  ...modelBadgeChipStyle,
+  background: 'var(--dsw-alias-bg-layer-2, rgba(127, 127, 127, 0.12))',
+  color: 'var(--dsw-alias-label-secondary, #bdbdbd)',
+}
+const probeWarningChipStyle: CSSProperties = {
+  ...modelBadgeChipStyle,
+  background: 'var(--dsw-alias-state-warn-subtle, rgba(234, 179, 8, 0.12))',
+  color: 'var(--dsw-alias-state-warn-primary, #eab308)',
+}
+
+/**
  * Localize an upstream promotional badge label, with an unknown-badge fallback.
  *
  * The CN catalog spells badges in Chinese (`限时免费`, `夜间折扣`); the
@@ -282,6 +333,24 @@ function modelBadgeLabel(badge: string, t: WorkBuddyPluginCardInjected['t']): st
   if (badge === '夜间折扣') return t('badgeNightDiscount')
   if (badge === 'Free now') return t('badgeFreeNow')
   return badge
+}
+
+/**
+ * The chip style for one recorded detection.
+ *
+ * Green is reserved for the one outcome that is actually a success — a
+ * non-empty set of accepted levels. A model that ignores the effort parameter
+ * is a settled but neutral finding, and an incomplete detection is unresolved;
+ * giving either the success colour would make them read as "verified".
+ *
+ * A `validating` record with no levels listed cannot happen from the probe
+ * (that outcome is stored as `non-validating`), but the wire value is not
+ * guaranteed, so it degrades to neutral rather than to green.
+ */
+function probeChipFor(result: { validation: string, efforts: readonly string[] }): CSSProperties {
+  if (result.validation === 'validating' && result.efforts.length > 0) return modelBadgeChipStyle
+  if (result.validation === 'non-validating') return probeNeutralChipStyle
+  return probeWarningChipStyle
 }
 const progressTrackStyle: CSSProperties = { height: 8, overflow: 'hidden', borderRadius: 999, background: 'var(--dsw-alias-bg-layer-2, rgba(0, 0, 0, 0.08))' }
 
@@ -700,6 +769,54 @@ function formatTokens(tokens: number): string {
  *   parameter ("this model does not check it"), never as a statement that a
  *   level is unsupported.
  */
+/**
+ * The composer-chrome switches.
+ *
+ * Two checkboxes rather than a settings section: DSH 0.2.x has no plugin
+ * settings API, and a preference a user cannot reach is not a preference. They
+ * live on the status tab because they are about this plugin's own annotations.
+ *
+ * Each box reflects the *server's* answer, not a local guess: a toggle that
+ * fails to persist (unwritable home, say) leaves the box where it was, so the
+ * control never claims a state the file does not hold.
+ */
+function ComposerSwitches({ ui, t, onChange, busy }: {
+  ui: WorkBuddyWebUiPreferences
+  t: WorkBuddyPluginCardInjected['t']
+  onChange: (patch: { showCreditBadge?: boolean; showReasoningLevels?: boolean }) => void
+  busy: boolean
+}): React.ReactNode {
+  return (
+    <div style={tabPanelStyle}>
+      <h3 style={quotaTitleStyle}>{t('composerHeading')}</h3>
+      <p style={bodyStyle}>{t('composerIntro')}</p>
+      <label style={quotaLabelStyle}>
+        <span style={contextRowMainStyle}>
+          <input
+            type="checkbox"
+            checked={ui.showCreditBadge}
+            disabled={busy}
+            onChange={event => { onChange({ showCreditBadge: event.currentTarget.checked }) }}
+          />
+          <span>{t('composerShowCredit')}</span>
+        </span>
+      </label>
+      <label style={quotaLabelStyle}>
+        <span style={contextRowMainStyle}>
+          <input
+            type="checkbox"
+            checked={ui.showReasoningLevels}
+            disabled={busy}
+            onChange={event => { onChange({ showReasoningLevels: event.currentTarget.checked }) }}
+          />
+          <span>{t('composerShowLevels')}</span>
+        </span>
+      </label>
+    </div>
+  )
+}
+
+/** The probe detection section: candidates, recorded outcomes, and per-model actions. */
 function ProbeSection({ probe, models, t, onDetect, onClear, busy }: {
   probe: WorkBuddyWebProbeSection
   /** Catalog rows from the same status document, for candidate display names. */
@@ -740,6 +857,9 @@ function ProbeSection({ probe, models, t, onDetect, onClear, busy }: {
     runningArmed.current = false
     setRunningModel(undefined)
   }, [runningModel, busy, probe.running])
+  // Rows ordered by information value, with duplicate names qualified. Both
+  // lists are index-aligned, so the label and the id it acts on never diverge.
+  const { ids: rowIds, labels } = rankedCandidates(probe.candidates, probe.results, models)
   return (
     <div style={quotaListStyle}>
       <h3 style={quotaTitleStyle}>{t('probeHeading')}</h3>
@@ -752,34 +872,49 @@ function ProbeSection({ probe, models, t, onDetect, onClear, busy }: {
         * Previously the buttons lived in a block above the results, so a model
         * that had been detected left the button list and reappeared only as a
         * result below — re-running it meant clearing every other result. Rows
-        * keep the model and its action together, and the order is fixed by the
-        * catalog, so nothing moves when a detection lands.
+        * keep the model and its action together.
+        *
+        * The order is *value* order, not catalog order (`rankedCandidates`):
+        * nine of eleven CN models answer "not adjustable", and leaving them in
+        * catalog order pushed the only row with selectable levels to the very
+        * bottom of the panel.
         */}
       {probe.candidates.length === 0
         ? <p style={bodyStyle}>{t('probeResultEmpty')}</p>
         : (
           <div style={quotaGroupStyle}>
-            {probe.candidates.map(id => {
+            {rowIds.map((id, index) => {
               const result = probe.results.find(entry => entry.id === id)
-              // Display name: the catalog's own label first, then whatever the
-              // recorded probe stored, then the bare id. The *action* below
-              // keeps using the id regardless of what the name resolves to.
-              const name = models?.find(model => model.id === id)?.name ?? result?.name ?? id
+              // Display name: the ranked, disambiguated label for this row. The
+              // *action* below keeps using the id regardless of what the name
+              // resolves to, so a qualified label can never change which model
+              // is detected.
+              const name = labels[index] ?? id
+              // A settled "not adjustable" answer is worth re-running only if
+              // the user suspects the upstream changed; the catalog can also
+              // start declaring levels on its own, which invalidates the record
+              // and drops the model from this list entirely. Keeping the button
+              // primary for every row made nine dead ends look like nine
+              // actions, so this one case renders its action as secondary.
+              const settled = result?.validation === 'non-validating'
               return (
                 <div key={id} style={modelOfferStyle}>
                   <div style={probeRowStyle}>
                     <span>{name}</span>
                     <span style={probeRowEndStyle}>
                       {result === undefined ? null : (
-                        <span style={modelBadgeChipStyle}>
-                          {result.validation === 'validating' && result.efforts.length > 0
-                            ? result.efforts.join(' / ')
-                            : t(result.validation === 'non-validating' ? 'probeResultNotValidating' : 'probeResultUnknown')}
+                        <span style={probeChipFor(result)}>
+                          {/*
+                            * The chip text also names the level the catalog
+                            * declares, so a "not adjustable" row still says
+                            * what the model runs at. See `probeChipText`.
+                            */}
+                          {probeChipText(result, models?.find(model => model.id === id), t)}
                         </span>
                       )}
                       <button
                         type="button"
-                        style={buttonStyle}
+                        style={settled ? secondaryButtonStyle : buttonStyle}
                         disabled={probe.running || busy}
                         onClick={() => { setPending(id) }}
                       >
@@ -1047,7 +1182,7 @@ export function WorkBuddyPluginCard({ t, variant = CN_CARD_VARIANT }: WorkBuddyP
    * the host never accepts a prompt, a sentinel, or a model outside its own
    * catalog from here.
    */
-  const control = useCallback(async (action: { action: 'probe'; model: string } | { action: 'clear' } | { action: 'set-maximum-context-window'; enabled: boolean } | { action: 'set-model-visibility'; model: string; visible: boolean; account: string }): Promise<void> => {
+  const control = useCallback(async (action: { action: 'probe'; model: string } | { action: 'clear' } | { action: 'set-maximum-context-window'; enabled: boolean } | { action: 'set-model-visibility'; model: string; visible: boolean; account: string } | { action: 'set-composer-display'; showCreditBadge?: boolean; showReasoningLevels?: boolean }): Promise<void> => {
     const key = status?.status === 'signed-in' ? status.probeKey : undefined
     if (key === undefined) return
     // A visibility toggle runs on its own per-row in-flight set so the
@@ -1283,6 +1418,20 @@ export function WorkBuddyPluginCard({ t, variant = CN_CARD_VARIANT }: WorkBuddyP
                       )}
                       {status.creditsError === undefined ? null
                         : <p style={errorStyle}>{t('creditsError', { message: status.creditsError })}</p>}
+                      {/*
+                        * The composer switches are rendered by the CN card only:
+                        * the preference is machine-wide, and showing the same two
+                        * checkboxes on both cards would invite the user to change
+                        * it twice for one effect.
+                        */}
+                      {status.ui === undefined || variant?.id !== CN_CARD_VARIANT.id ? null : (
+                        <ComposerSwitches
+                          ui={status.ui}
+                          t={t}
+                          busy={busy}
+                          onChange={patch => { void control({ action: 'set-composer-display', ...patch }) }}
+                        />
+                      )}
                       {status.probe === undefined ? null : (
                         <ProbeSection
                           probe={status.probe}

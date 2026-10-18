@@ -62,6 +62,14 @@ export interface WorkBuddyProbeRouteOptions {
    */
   setModelVisibility?: (modelId: string, visible: boolean, expectedAccount: string) => Promise<{ state: string; reason?: string }>
   /**
+   * Persist which composer annotations this plugin draws.
+   *
+   * A write like the others, so it shares the in-process key. It touches no
+   * credential and spends no credit — the key is required because loopback
+   * alone is not authentication, and this route is the one the card holds.
+   */
+  setComposerDisplay?: (patch: { showCreditBadge?: boolean; showReasoningLevels?: boolean }) => Promise<{ state: string; reason?: string }>
+  /**
    * Route path to mount. Defaults to the CN variant's path so existing callers
    * and tests keep their behaviour; the international variant passes its own.
    */
@@ -132,6 +140,20 @@ function parseAction(text: string): WorkBuddyProbeAction | undefined {
     if (typeof wrapped['visible'] !== 'boolean') return undefined
     if (typeof account !== 'string' || account === '') return undefined
     return { action: 'set-model-visibility', model: model.trim(), visible: wrapped['visible'], account }
+  }
+  if (action === 'set-composer-display') {
+    // Each field is optional so a caller can flip one switch without restating
+    // the other; a body carrying neither is meaningless and refused.
+    const credit = wrapped['showCreditBadge']
+    const levels = wrapped['showReasoningLevels']
+    if (credit !== undefined && typeof credit !== 'boolean') return undefined
+    if (levels !== undefined && typeof levels !== 'boolean') return undefined
+    if (credit === undefined && levels === undefined) return undefined
+    return {
+      action: 'set-composer-display',
+      ...credit === undefined ? {} : { showCreditBadge: credit },
+      ...levels === undefined ? {} : { showReasoningLevels: levels },
+    }
   }
   if (action === 'probe') {
     const model = wrapped['model']
@@ -204,6 +226,17 @@ export function workBuddyProbeHandler(
           action.visible === true,
           action.account as string,
         ))
+        return
+      }
+      if (action.action === 'set-composer-display') {
+        if (deps.setComposerDisplay === undefined) {
+          json(res, 404, { error: 'composer-display-setting-not-supported' })
+          return
+        }
+        json(res, 200, await deps.setComposerDisplay({
+          ...action.showCreditBadge === undefined ? {} : { showCreditBadge: action.showCreditBadge },
+          ...action.showReasoningLevels === undefined ? {} : { showReasoningLevels: action.showReasoningLevels },
+        }))
         return
       }
       json(res, 200, await deps.probe(action.model as string))

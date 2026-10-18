@@ -29,9 +29,13 @@ check('exposes apply', typeof host.apply === 'function')
 // bundle (a route left on the old package name would never be mounted).
 const variants = host.WORKBUDDY_VARIANTS ?? []
 check('two variants', variants.length === 2, `got ${variants.length}`)
-check('CN provider id', variants.some(v => v.id === 'workbuddy'))
-check('AI provider id', variants.some(v => v.id === 'workbuddy-ai'))
+check('CN provider id', variants.some(v => v.id === 'workbuddy-suite'))
+check('AI provider id', variants.some(v => v.id === 'workbuddy-ai-suite'))
+// The provider ids must stay namespaced: the bare `workbuddy` / `workbuddy-ai`
+// belong to dsh-workbuddy-connect, and sharing one makes the two plugins
+// overwrite each other instead of coexisting.
 for (const variant of variants) {
+  check(`${variant.id} provider id is namespaced`, variant.id.endsWith('-suite'), variant.id)
   check(`${variant.id} status route namespaced`, variant.statusPath.startsWith('/plugins/dsh-buddy-suite/'), variant.statusPath)
   check(`${variant.id} probe route namespaced`, variant.probePath.startsWith('/plugins/dsh-buddy-suite/'), variant.probePath)
 }

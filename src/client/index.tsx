@@ -46,7 +46,17 @@ import type { WorkBuddySettingsKey } from './locales.ts'
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
     /** WorkBuddy plugin card copy. */
-    'settings.workbuddy': WorkBuddySettingsKey
+    /**
+     * This bundle's own locale namespace.
+     *
+     * Deliberately NOT `settings.workbuddy`: dsh-workbuddy-connect registers
+     * that exact namespace, and two bundles registering one namespace means the
+     * last writer owns the dictionary. With the other plugin installed, its
+     * dictionary masked this one; with it removed, this bundle's registration
+     * had not supplied the copy the card reads and every string rendered as its
+     * key name.
+     */
+    'settings.buddy-suite': WorkBuddySettingsKey
   }
   interface SlotMap {
     /**
@@ -158,14 +168,31 @@ function guardClientContribution<T>(label: string, fn: () => T): T | undefined {
  * sync with that spec.
  */
 export function apply(ctx: ClientContext): void {
-  // The locale copy feeds every contribution below through `t`. Its guard
-  // exists only so a broken locale service cannot reach the loader; if it
-  // degrades, `t` still binds and renders the key names as fallback copy.
-  const namespace = 'settings.workbuddy'
+  // The locale copy feeds every contribution below through `t`.
+  //
+  // `register` is guarded so a broken locale service cannot reach the loader,
+  // but the guard has a visible cost: when registration fails, the bound `t`
+  // falls back to **rendering the key name**, and the card reads as a list of
+  // identifiers (`title`, `accountHeading`, …) instead of copy. So the bound
+  // translator is wrapped: any lookup that comes back as the key itself is
+  // answered from the bundled `zh` table. Chinese is the right fallback here
+  // because this bundle's chrome and every host-side string are already
+  // Chinese — an English fallback would leave the panel mixed.
+  const namespace = 'settings.buddy-suite'
   guardClientContribution('settings copy', () => {
     ctx.effect(() => ctx.locale.register(namespace, { zh, en }), 'dsh-buddy-suite: settings copy')
   })
-  const t = ctx.locale.bind(namespace) as WorkBuddyPluginCardInjected['t']
+  const bound = ctx.locale.bind(namespace) as WorkBuddyPluginCardInjected['t']
+  const t = ((key: never, params?: Record<string, unknown>) => {
+    const resolved = bound(key as never, params as never) as string
+    // A translator that echoes the key back found nothing for it.
+    if (resolved !== key) return resolved
+    const template = (zh as unknown as Record<string, string>)[key as unknown as string]
+    if (template === undefined) return resolved
+    return params === undefined
+      ? template
+      : template.replace(/\{(\w+)\}/gu, (_, name: string) => String(params[name] ?? ''))
+  }) as WorkBuddyPluginCardInjected['t']
   // The update reminder: one store for the whole bundle (the check compares
   // this npm package's own version, so both provider cards share it). It
   // refreshes once on mount through a 7-day localStorage cache and never
@@ -183,7 +210,9 @@ export function apply(ctx: ClientContext): void {
     ctx.slots.inject('shell.overlay', () => (
       guardClientContribution('update reminder overlay', () => ctx.slots.register({
         name: 'shell.overlay',
-        id: 'workbuddy-update',
+        // Namespaced: dsh-workbuddy-connect registers `workbuddy-update` into
+        // the same list slot, and two entries sharing an id would collide.
+        id: 'workbuddy-suite-update',
         order: 40,
         locale: namespace,
         inject: () => ({ t, updater }),
@@ -227,7 +256,11 @@ export function apply(ctx: ClientContext): void {
         scope.slots.inject('conversation.input.right', () => (
           guardClientContribution('conversation probe control', () => scope.slots.register({
             name: 'conversation.input.right',
-            id: 'workbuddy-probe',
+            // Namespaced: dsh-workbuddy-connect registers `workbuddy-probe`
+            // into the same list slot. The control itself only appears for a
+            // selected provider this bundle owns, so both can sit here without
+            // showing two icons at once.
+            id: 'workbuddy-suite-probe',
             order: 10,
             inject: sessionId => ({
               directory: scope.modelDirectories.directoryFor(

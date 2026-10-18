@@ -149,7 +149,10 @@ describe('discover', () => {
     expect(found.credentials).toEqual([])
     expect(found.unreadable).toHaveLength(1)
     expect(found.unreadable[0]!.uid).toBe('uid-sealed')
-    expect(found.unreadable[0]!.reason).toMatch(/encrypted|key/u)
+    // The reason is user-facing copy rendered verbatim by a Chinese panel, so it
+    // must be Chinese; asserting on the wording also pins the localization.
+    expect(found.unreadable[0]!.reason).toMatch(/加密|密钥|凭据/u)
+    expect(found.unreadable[0]!.reason).not.toMatch(/credential|encrypted|key/u)
   })
 
   it('opens an encrypted backup when the machine key matches', async () => {
@@ -189,6 +192,53 @@ describe('discover', () => {
     const found = await discover([first, second], { keySource: wrongKey })
     expect(found.credentials.map(c => c.accessToken)).toEqual(['plain'])
     expect(found.unreadable).toEqual([])
+  })
+})
+
+describe('nickname display', () => {
+  it('keeps a correct CJK nickname byte-for-byte', async () => {
+    // A real account name from a real machine. The plugin must never rewrite
+    // it: the value that reaches the panel is the value the app stores, and an
+    // earlier report of this name as mojibake turned out to be the reporting
+    // tool's console encoding, not the plugin's decoding.
+    const dir = await tempDir('buddy-checkin-nickname-')
+    await writeFile(join(dir, 'workbuddy-desktop.info'), backupDocument({ uid: 'uid-name', nickname: '陈皮洋' }))
+    const found = await discover(dir)
+    expect(found.credentials[0]!.nickname).toBe('陈皮洋')
+    // And it round-trips through the wire shape the panel renders.
+    const document = documentOf({
+      day: today(),
+      checkedAt: new Date().toISOString(),
+      results: [{ uid: 'uid-name', nickname: '陈皮洋', state: 'signed', at: new Date().toISOString() }],
+    })
+    expect(document.results[0]!.nickname).toBe('陈皮洋')
+  })
+
+  it('drops a nickname carrying the lossy-decode marker', async () => {
+    const dir = await tempDir('buddy-checkin-nickname-bad-')
+    // `U+FFFD` is what a lossy decode substitutes for bytes it could not read;
+    // the original text is gone, so the id is shown instead.
+    await writeFile(join(dir, 'workbuddy-desktop.info'), backupDocument({ uid: 'uid-bad', nickname: '陈\uFFFD洋' }))
+    const found = await discover(dir)
+    expect(found.credentials[0]!.nickname).toBeUndefined()
+    expect(found.credentials[0]!.uid).toBe('uid-bad')
+  })
+
+  it('keeps a nickname that merely looks odd but decoded cleanly', async () => {
+    // The exact string an earlier report showed for a correct name: it is a
+    // console-rendering artefact, not corruption, so it carries no U+FFFD and
+    // must pass through untouched rather than be "repaired" into a guess.
+    const dir = await tempDir('buddy-checkin-nickname-odd-')
+    await writeFile(join(dir, 'workbuddy-desktop.info'), backupDocument({ uid: 'uid-odd', nickname: 'éç®æ´' }))
+    const found = await discover(dir)
+    expect(found.credentials[0]!.nickname).toBe('éç®æ´')
+  })
+
+  it('drops a nickname built only from control characters', async () => {
+    const dir = await tempDir('buddy-checkin-nickname-ctrl-')
+    await writeFile(join(dir, 'workbuddy-desktop.info'), backupDocument({ uid: 'uid-ctrl', nickname: '\u0000\u0001\u0002' }))
+    const found = await discover(dir)
+    expect(found.credentials[0]!.nickname).toBeUndefined()
   })
 })
 

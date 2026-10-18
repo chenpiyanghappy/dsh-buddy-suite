@@ -1,4 +1,4 @@
-/** Plugin-card copy registered under the settings.workbuddy locale namespace. */
+/** Plugin-card copy registered under the settings.buddy-suite locale namespace. */
 
 export const en = {
   title: 'DSH WorkBuddy Connect',
@@ -62,14 +62,18 @@ export const en = {
   rate: '{rate} credits per message',
   rateUnknown: 'Price unavailable — refresh to update',
   probeLabel: 'Reasoning levels',
+  composerHeading: 'Composer display',
+  composerIntro: 'These two annotations sit at the right of the conversation input box. Turn them off if another plugin already shows your balance, or if you switch between providers and see two sets of them.',
+  composerShowCredit: 'Show the credit badge',
+  composerShowLevels: 'Show the reasoning-level entry',
   probeTooltipIdle: 'Detect the reasoning levels {model} accepts',
   probeTooltipVerified: 'Accepted levels: {levels} · click to detect again',
-  probeTooltipNotValidating: 'This model does not check the effort parameter',
+  probeTooltipNotValidating: 'Not adjustable here: this model ignores the effort parameter, so it always runs at its default level',
   probeTooltipRetry: 'Detection did not complete · click to retry',
   probeBubbleBody: 'Send test requests to confirm the available reasoning levels. May consume a small amount of credit.',
   probeConfirmAction: 'Confirm',
   probeNoteVerified: 'Detected: {levels}',
-  probeNoteNotValidating: 'This model does not check the effort parameter',
+  probeNoteNotValidating: 'This model ignores the reasoning-effort parameter: a deliberately impossible level was accepted just like any other, so changing the level would not change its behaviour. No levels are offered and the model always runs at its default level. This is not a failed detection and needs no action.',
   probeNoteUnknown: 'Detection did not complete',
   probeNoteDismiss: 'Got it',
   probeHeading: 'Reasoning effort detection',
@@ -85,7 +89,8 @@ export const en = {
   probeConfirmBody: 'Send test requests to {model} to confirm its available reasoning levels. May consume a small amount of credit.',
   cancel: 'Cancel',
   probeResultVerified: 'Verified levels: {levels}',
-  probeResultNotValidating: 'This model does not check the effort parameter',
+  probeResultNotValidating: 'Not adjustable · default level',
+  probeDeclaredSuffix: ' (catalogue declares {levels})',
   probeResultUnknown: 'Detection did not complete',
   probeResultAt: 'Detected {time}',
   probeResultEmpty: 'No detectable models right now.',
@@ -194,14 +199,35 @@ export const zh: Record<WorkBuddySettingsKey, string> = {
   rate: '{rate} 积分/次',
   rateUnknown: '价格未知 — 刷新后更新',
   probeLabel: '推理等级',
+  composerHeading: '输入框显示',
+  composerIntro: '这两项显示在对话输入框右侧。如果已有别的插件显示余额，或经常在多个供应商之间切换，可以关掉，避免重复。',
+  composerShowCredit: '显示余额速览（剩余积分）',
+  composerShowLevels: '显示推理档位入口',
   probeTooltipIdle: '检测 {model} 可用的推理档位',
   probeTooltipVerified: '已接受：{levels} · 点击可重新检测',
-  probeTooltipNotValidating: '该模型不校验该参数',
+  /*
+   * The three `non-validating` strings explain the same finding at three sizes.
+   *
+   * The finding itself: the probe sent a deliberately impossible effort value
+   * and the upstream answered `200` instead of rejecting it, which proves the
+   * model ignores `reasoning_effort` entirely. The per-level sweep that follows
+   * is therefore meaningless — every level would appear "accepted" — so no
+   * levels are offered and the model keeps whatever effort it uses by default.
+   *
+   * The earlier copy said only 「该模型不校验该参数」, which named neither the
+   * parameter nor the consequence: a reader could not tell whether the plugin
+   * was broken, whether the model had levels at all, or whether anything was
+   * expected of them. Each string below therefore states the outcome (no
+   * selectable levels), and the two with room say why and what still happens:
+   * the tooltip gets one line, the note gets the full reason, and the badge —
+   * which is a narrow chip — gets the conclusion alone.
+   */
+  probeTooltipNotValidating: '该模型无法调整推理档位（不检查推理强度参数），将使用其默认档位',
   probeTooltipRetry: '检测未完成 · 点击重试',
   probeBubbleBody: '发送探测请求以确认可用推理档位。可能消耗少量积分。',
   probeConfirmAction: '确认检测',
+  probeNoteNotValidating: '该模型不检查推理强度（reasoning effort）参数：我们用一个不存在的档位测试，它同样正常返回，说明换档位不会改变行为。因此不提供档位选择，模型固定按其默认档位运行；这不是检测失败，无需处理。',
   probeNoteVerified: '已检测：{levels}',
-  probeNoteNotValidating: '该模型不校验该参数',
   probeNoteUnknown: '检测未完成',
   probeNoteDismiss: '知道了',
   probeHeading: '推理档位检测',
@@ -217,7 +243,14 @@ export const zh: Record<WorkBuddySettingsKey, string> = {
   probeConfirmBody: '向 {model} 发送探测请求，以确认可用推理档位。可能消耗少量积分。',
   cancel: '取消',
   probeResultVerified: '已验证接受的档位：{levels}',
-  probeResultNotValidating: '该模型不校验该参数',
+  /* Badge: narrow chip. States the conclusion, not the mechanism. */
+  probeResultNotValidating: '不可调档位 · 用默认档位',
+  /*
+   * Appended to the badge when the catalog names the level the model will use
+   * anyway. "Not adjustable" alone leaves the reader unable to tell what the
+   * model is doing instead; naming that level closes the gap.
+   */
+  probeDeclaredSuffix: '（目录声明 {levels}）',
   probeResultUnknown: '检测未完成',
   probeResultAt: '检测于 {time}',
   probeResultEmpty: '当前没有可检测的模型。',

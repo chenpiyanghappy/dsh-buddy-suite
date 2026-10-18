@@ -1,0 +1,144 @@
+# 已知问题与发布前待办
+
+这份清单记录 `dsh-buddy-suite` 当前**尚未解决**的问题。按影响面排序：前两类会影响使用者，第三类是发布工作本身。
+
+> 状态说明：✅ 已验证　⚠️ 未验证　❌ 已知缺陷
+
+---
+
+## 一、与 dsh-workbuddy-connect 的关系
+
+**这两个插件是互斥替代关系，不是并列共存关系。**
+
+本插件的定位是「一个插件同时提供模型接入与每日签到」，让用户不必分别安装 `dsh-workbuddy-connect`（模型）和 `dsh-buddy-checkin`（签到）。装本插件即替代前两者。
+
+之所以必须替代 `dsh-buddy-checkin`：它在 `0.4.0`（2026-10-10）之后未再更新，peer 上界停在 `0.2.0-rc.2`，在 `0.2.1-rc.2` 内核上会被 DSH 直接拒绝安装。
+
+> 因此「模型选择器出现两个 WorkBuddy 分组」**不是缺陷**：只有同时安装两个插件才会发生，而正确用法是二选一。
+
+### id 已命名空间化 ✅
+
+两侧 id 原本完全相同，同装会互相覆盖。现已全部加上本插件的命名空间，使得「误装两个」时不至于静默替换，而是各自可见：
+
+| 冲突点 | 上游原值 | 本插件现值 |
+|---|---|---|
+| Cordis 节点 id | `llm-workbuddy` | `llm-workbuddy-suite` |
+| provider id | `workbuddy` / `workbuddy-ai` | `workbuddy-suite` / `workbuddy-ai-suite` |
+| 浮层 entry id | `workbuddy-update` | `workbuddy-suite-update` |
+| 推理控件 entry id | `workbuddy-probe` | `workbuddy-suite-probe` |
+
+已在真实配置下验证两者可同时运行、无冲突报错。
+
+**但推荐用法仍是只装本插件**，并移除 `dsh-workbuddy-connect`。移除后本插件独占，模型选择器只出现一个 WorkBuddy 分组。
+
+### 与 dsh-buddy-checkin 并存时 ⚠️
+
+两者写同一个状态文件 `$DSH_HOME/.buddy-checkin.json`（同源代码，格式恰好兼容）。若同时安装，任一方的写入会覆盖另一方。同样按「二选一」使用即可规避。
+
+---
+
+## 二、功能与运行环境
+
+### 已修复 ✅
+
+| 问题 | 表现 | 修复 |
+|---|---|---|
+| Electron 定位不回退 | 模型 provider 报 `signed-out`，而签到正常 | 平台默认路径改为「候选」，必须验证存在才采用，否则继续走注册表发现 |
+| 注册表单步超时过短 | 签到报「auto-location could not complete」，但 App 明明装了 | 单步 3s → 10s（全量枚举注册表在软件较多的机器上会超过 3s） |
+| 机制文案缺失 | 徽章显示字面量 `probeDeclaredSuffix` | 补齐中英文案 |
+| 重名模型无法区分 | 两个 model id 都叫 `Hy3` | 重名时附加费率：`Hy3 · x0.00` / `Hy3 · x0.05` |
+| 有效结果排最底 | 唯一有档位的模型排在 11 行末尾 | 按信息价值排序：有效档位 → 未检测 → 不可调 → 未完成 |
+| 按钮不可见 | 降级样式把边框也设成透明，控制消失了 | 保留可见边框，只去掉填充色 |
+| 输入框控件无法关闭 | 已装余额插件的用户、多供应商切换的用户会看到重复控件 | 卡片内新增「输入框显示」两个独立开关，按机器保存 |
+| 界面显示 key 名 | 关闭 `dsh-workbuddy-connect` 后，卡片所有文案显示成 `title`、`accountHeading` 等标识符 | 换用本插件专属的 locale 命名空间 `settings.buddy-suite`（原与 connect 共用 `settings.workbuddy`，字典被抢）；并加兜底：查不到词条时回退内置中文表，不再回退为 key 名 |
+| 签到面板未汉化 | 结果、按钮、错误原因整块是英文，而面板本身是中文 | 面板与宿主侧的用户可见字符串全部改为中文；新增 `tests/localization.spec.ts` 守卫防复发 |
+
+### 已验证 ✅
+
+在真实 DSH 进程中（非沙箱）实测：
+
+- 签到状态 `ok`，正确识别「今日已在 App 签到」并跳过重复请求
+- 余额读取正常（13486）
+- 余额刷新正常（重查后 13408）
+- 失败重试接口正常返回
+- 输入框开关：关闭单项后 status 文档同步反映、两项互不影响、写入文件、**重启后仍然生效**
+- **实际对话可用**：用户已用本插件注册的模型（`workbuddy-suite/hy4-preview`）完成整轮对话，链路全程工作
+- **界面文案正常**：用户亲眼确认卡片与输入框显示中文，不再出现 key 名（此前关闭 connect 时会）
+
+### 遗留问题 ⚠️
+
+- **本插件自带的 provider id 仍带 `-suite` 后缀**（`workbuddy-suite`）。既然它与 connect 是互斥替代关系，本可用 `workbuddy`；但改动涉及代码与测试，为不影响即将进行的提交而暂未调整，建议后续版本统一。
+
+- **沙箱环境无法运行签到**。签到需要 spawn 子进程（`reg.exe` 查注册表、启动 WorkBuddy 的 Electron 取密钥），而受限环境（如本开发沙箱）会以 `EPERM` 拒绝。**这是环境限制，不是代码缺陷**，普通 DSH 运行不受影响。诊断信息会如实显示为「could not complete」而非误报「未安装」。
+
+- **未在 Linux / macOS 真机验证**。Electron 定位实现了 macOS 默认路径与 Windows 注册表发现，Linux 需要显式指定 `WORKBUDDY_ELECTRON_BIN`。只有 Windows 实测过。
+
+- **国际版（WorkBuddy AI）未验证**。本机未安装国际版 App，相关路径（`workbuddy-ai-suite` provider、`/ai/status` 路由）只做了「无凭据时返回 signed-out」的验证，没有真实账号跑通过。
+
+- **签到仅国内版**。国际版 token 调国内签到端点返回 401，这是上游限制。
+
+---
+
+## 三、发布前待办
+
+以下都是 `npm publish` 之前必须处理的技术问题。
+
+### manifest 缺字段 ❌
+
+```jsonc
+// 当前 package.json 缺少：
+"repository": { "type": "git", "url": "..." },   // npm 会告警/报错
+"homepage": "https://github.com/...",            // 可选但建议
+"bugs": { "url": "https://github.com/.../issues" },
+```
+
+### `bin` 未声明 ❌
+
+`lib/bin.js` 已构建且能运行，但 `package.json` 里没有 `bin` 字段，安装后不会生成 `dsh-buddy-suite` 命令。
+
+```jsonc
+"bin": { "dsh-buddy-suite": "lib/bin.js" }
+```
+
+### `files` 漏了英文 README ⚠️
+
+```jsonc
+"files": ["lib", "cordis.patch.yml", "README.md", "LICENSE"]
+//         缺少 README.en.md
+```
+
+### 版本兼容性 ⚠️
+
+peerDependencies 精确锁定 `0.2.1-rc.2`。这是**刻意**的：内核 API 在 rc 之间有变动，锁死可以避免装上后崩溃。但代价是**内核升级就需要同步发版**。
+
+另外，`dsh-buddy-checkin@0.4.0` 曾因 peer 范围不含 `0.2.1-rc.2` 被 DSH 拒绝安装——本插件的 peer 已对齐到 `0.2.1-rc.2`，可以正常安装。
+
+### 本地安装使用绝对路径 ⚠️
+
+`dsh plugin add <路径>` 会写入 `link:D:/AI Agent/...` 这样的绝对路径，**只在本机有效**。发布版使用者走 npm 装，不受影响；但如果文档里写「本地开发安装」，需要说明这一点。
+
+### 未在干净环境验证安装 ❌
+
+当前所有验证都是 `link:` 到源码目录。**没有测试过** `npm pack` 后从 tarball 安装的完整流程（包括 `lib/` 是否自包含、peer 是否满足）。
+
+---
+
+## 四、文档待补
+
+- 两个 WorkBuddy 分区出现时，如何选择、能否只装签到
+- 沙箱/受限环境下的已知限制
+- 未验证平台（Linux / macOS / 国际版）的说明
+
+---
+
+## 附：修复这些问题的验证方式
+
+```sh
+# 类型检查 + 测试 + 构建 + 三项自检
+pnpm run check
+
+# 受限环境（沙箱禁止 spawn）下跑测试
+pnpm run check:offline
+```
+
+当前状态：typecheck 通过，73 个测试通过，三项自检通过。

@@ -90,13 +90,18 @@ check('client plugin name', name === 'dsh-buddy-suite-client', name)
 
 apply(ctx)
 
-/** Every slot the bundle claims to fill, with the id/key it uses. */
+/**
+ * Every slot the bundle claims to fill, with the id/key it uses.
+ *
+ * All four list-slot entry ids are namespaced: dsh-workbuddy-connect fills the
+ * same slots, and an id shared between the two would collide.
+ */
 const expected = [
-  ['shell.overlay', 'workbuddy-update'],
-  ['settings.plugin.item', 'workbuddy'],
-  ['settings.plugin.item', 'workbuddy-ai'],
+  ['shell.overlay', 'workbuddy-suite-update'],
+  ['settings.plugin.item', 'workbuddy-suite'],
+  ['settings.plugin.item', 'workbuddy-ai-suite'],
   ['plugins.bundle.config', 'dsh-buddy-suite'],
-  ['conversation.input.right', 'workbuddy-probe'],
+  ['conversation.input.right', 'workbuddy-suite-probe'],
   ['conversation.session.header.actions', 'buddy-checkin-header'],
 ]
 

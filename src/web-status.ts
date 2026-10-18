@@ -15,7 +15,7 @@ import { normalizeCredits } from './upstream.ts'
 import type { WorkBuddyModelInfo } from './catalog.ts'
 import { hostIsLoopback, originIsLoopback } from './loopback.ts'
 import { WORKBUDDY_STATUS_PATH } from './status-paths.ts'
-import type { WorkBuddyWebCatalog, WorkBuddyWebModelBadge, WorkBuddyWebProbeSection, WorkBuddyWebStatus, WorkBuddyWebVisibilitySection } from './status-paths.ts'
+import type { WorkBuddyWebCatalog, WorkBuddyWebModelBadge, WorkBuddyWebProbeSection, WorkBuddyWebStatus, WorkBuddyWebUiPreferences, WorkBuddyWebVisibilitySection } from './status-paths.ts'
 
 export { WORKBUDDY_STATUS_PATH } from './status-paths.ts'
 export type { WorkBuddyWebStatus } from './status-paths.ts'
@@ -38,6 +38,14 @@ export interface WorkBuddyStatusRouteOptions {
   catalog?: () => WorkBuddyWebCatalog | undefined
   /** In-process key authorizing probe control writes. */
   probeKey?: string
+  /**
+   * Which composer annotations to render.
+   *
+   * Optional so the status route keeps working in tests and headless profiles;
+   * a caller that offers none gets no `ui` field, and the composer control then
+   * falls back to showing both — the pre-switch behaviour.
+   */
+  ui?: () => WorkBuddyWebUiPreferences
   /**
    * International-card preference selecting larger declared context windows.
    * The getter may answer `undefined` when this host cannot persist the
@@ -148,6 +156,17 @@ export async function workBuddyWebStatus(
         // cached row): the card then says the price needs a refresh instead of
         // repeating a stale figure or implying the model is free.
         ...model.billing?.rateUnknown === true ? { rateUnknown: true as const } : {},
+        // Declared efforts ride along so the probe panel can name the level a
+        // model actually uses when its effort parameter turns out not to be
+        // checked. Omitted when the catalog declares nothing: a model with no
+        // declared set genuinely has no answer to give, and inventing one would
+        // be worse than saying nothing.
+        ...(model.reasoning?.supportedEfforts?.length ?? 0) > 0
+          ? { declaredEfforts: model.reasoning!.supportedEfforts! }
+          : {},
+        ...model.reasoning?.defaultEffort === undefined
+          ? {}
+          : { defaultEffort: model.reasoning.defaultEffort },
         // Verbatim from the upstream catalog; omitted when it said nothing.
         ...typeof model.contextWindow === 'number' && model.contextWindow > 0
           ? { contextWindow: model.contextWindow }
@@ -186,11 +205,16 @@ export async function workBuddyWebStatus(
     // host that cannot persist it answers `undefined` and the field stays out
     // of this document, which is the card's signal not to render the control.
     const maximumContextWindow = deps.useMaximumContextWindow?.()
+    // Composer visibility rides the same document: the control that renders the
+    // badge and the reasoning entry is the only reader, and a separate request
+    // would make it flash both annotations before hiding one.
+    const ui = deps.ui?.()
     probed = {
       ...statusWithModels,
       probe: deps.probe(),
       ...deps.probeKey === undefined ? {} : { probeKey: deps.probeKey },
       ...maximumContextWindow === undefined ? {} : { useMaximumContextWindow: maximumContextWindow },
+      ...ui === undefined ? {} : { ui },
     }
   }
   try {

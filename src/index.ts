@@ -51,6 +51,7 @@ import { WORKBUDDY_CONNECT_VERSION } from './version.ts'
 import { legacySettingsOf } from './legacy-settings.ts'
 import { CN_VARIANT, WORKBUDDY_VARIANTS, type WorkBuddyVariant } from './variants.ts'
 import { createBuddyCheckinStartup, registerBuddyCheckinRoutes } from './checkin-routes.ts'
+import { readUiPreferences, writeUiPreferences } from './ui-preferences.ts'
 
 export { WORKBUDDY_PROVIDER, WORKBUDDY_STREAM_IDLE_TIMEOUT_MS, createWorkBuddyAdapter, type WorkBuddyAdapter } from './adapter.ts'
 export { createWorkBuddyShim, type WorkBuddyShim } from './shim.ts'
@@ -700,6 +701,9 @@ export function apply(ctx: Context, config: Config): void {
         catalog: () => catalogSection(runtime),
         probe: () => probeSection(runtime, current().probeConsent === true),
         probeKey,
+        // Both variants read the same machine-wide preference, so the composer
+        // control answers consistently whichever provider is selected.
+        ui: () => readUiPreferences(),
         visibility: () => {
           const account = runtime.account()
           return account === undefined
@@ -779,6 +783,22 @@ export function apply(ctx: Context, config: Config): void {
             return { state: 'failed', reason: error instanceof Error ? error.message.slice(0, 300) : String(error) }
           }
           runtime.invalidate()
+          return { state: 'updated' }
+        },
+        setComposerDisplay: async patch => {
+          // The composer's chrome is machine-wide, not per account, so this
+          // writes without an identity guard: switching accounts on the desktop
+          // app should not resurrect a badge the user turned off.
+          try {
+            writeUiPreferences(patch)
+          } catch (error: unknown) {
+            // Reported as a failure rather than swallowed: a switch the user
+            // pressed must not look saved when the file could not be written.
+            return { state: 'failed', reason: error instanceof Error ? error.message.slice(0, 300) : String(error) }
+          }
+          // Every open composer reads this document; tell them it changed so the
+          // annotation appears or disappears without a reload.
+          ctx.emit('llm/adapters-updated')
           return { state: 'updated' }
         },
       }, probeKey)

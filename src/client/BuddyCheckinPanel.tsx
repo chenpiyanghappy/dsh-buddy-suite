@@ -91,25 +91,33 @@ function isCheckinDocument(value: unknown): value is BuddyCheckinDocument {
     && Array.isArray(wrapped['results'])
 }
 
-/** One account's outcome line. */
+/**
+ * One account's outcome line.
+ *
+ * Written in Chinese, matching the panel's own chrome. This component is
+ * deliberately self-contained (it owns its fetch and renders without the host's
+ * locale service), so it carries its copy inline rather than through a locale
+ * namespace — an earlier revision left these strings in English, which showed
+ * as untranslated text in an otherwise Chinese panel.
+ */
 function outcome(row: BuddyCheckinRow): string {
   if (row.state === 'signed') {
     const time = new Date(row.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    return `Checked in ${time}${row.credit === undefined ? '' : ` · +${row.credit} credits`}`
+    return `已签到 ${time}${row.credit === undefined ? '' : ` · +${row.credit} 积分`}`
   }
-  if (row.state === 'already') return 'Already checked in today in the app'
-  return `Failed: ${row.error ?? 'please retry'}`
+  if (row.state === 'already') return 'App 内今日已签到'
+  return `失败：${row.error ?? '请稍后重试'}`
 }
 
 /** One account's balance line, including why it is unavailable when it is. */
 function balanceLine(row: BuddyCheckinRow): string {
-  if (row.balance === undefined) return 'Credits: unavailable'
-  return `Remaining credits: ${row.balance.toLocaleString()}`
+  if (row.balance === undefined) return '积分：暂不可用'
+  return `剩余积分：${row.balance.toLocaleString()}`
     + (row.balanceError !== undefined
       ? ` · ${row.balanceError}`
       : row.balanceCheckedAt !== undefined
-        ? ` · updated ${new Date(row.balanceCheckedAt).toLocaleTimeString()}`
-        : ' · last record')
+        ? ` · ${new Date(row.balanceCheckedAt).toLocaleTimeString()} 更新`
+        : ' · 上次记录')
 }
 
 /** The header entry and its details panel. */
@@ -145,7 +153,7 @@ export function BuddyCheckinPanel(): React.ReactElement | null {
       if (notify && parsed.notice !== undefined) setToast(parsed.notice)
     } catch {
       if (id !== requestId.current) return
-      setQueryError('The query failed; reopen the panel to retry. Showing the last record.')
+      setQueryError('查询失败，请重新打开面板重试；当前显示上次记录')
       setDocument(previous => previous ?? { day: '', checkedAt: 0, results: [], status: 'none' })
     } finally {
       if (id === requestId.current) setLoading(false)
@@ -207,7 +215,7 @@ export function BuddyCheckinPanel(): React.ReactElement | null {
       <button
         type="button"
         onClick={openPanel}
-        title="WorkBuddy daily check-in"
+        title="WorkBuddy 签到"
         style={{
           display: 'inline-flex',
           alignItems: 'center',
@@ -243,7 +251,7 @@ export function BuddyCheckinPanel(): React.ReactElement | null {
           <button
             type="button"
             onClick={() => setOpen(false)}
-            aria-label="Close"
+            aria-label="关闭"
             style={{
               float: 'right',
               background: 'transparent',
@@ -258,14 +266,14 @@ export function BuddyCheckinPanel(): React.ReactElement | null {
           </button>
           <b style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 14 }}>
             <img src={ICON} alt="" className="buddy-checkin-icon" style={{ width: 16, height: 16 }} />
-            WorkBuddy daily check-in
+            WorkBuddy 签到
           </b>
           <div style={{ color: LABEL_SECONDARY, fontSize: 12, margin: '7px 0' }}>
-            This start checked:
+            本次启动检查：
             {' '}
             {document.checkedAt === 0 ? '—' : new Date(document.checkedAt).toLocaleString()}
           </div>
-          {loading && <div role="status">Querying…</div>}
+          {loading && <div role="status">正在查询…</div>}
           {queryError !== undefined && <div role="alert">{queryError}</div>}
           {/* Accounts are capped at roughly 2.5 rows; the rest scroll, so the
               title and the retry button stay visible no matter how many
@@ -312,7 +320,7 @@ export function BuddyCheckinPanel(): React.ReactElement | null {
                 fontSize: 13,
               }}
             >
-              {retrying ? 'Retrying…' : 'Retry failed accounts'}
+              {retrying ? '正在重试…' : '重试失败账号'}
             </button>
           )}
         </div>

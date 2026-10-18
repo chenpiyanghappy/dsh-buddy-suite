@@ -386,7 +386,27 @@ const WINDOWS_REGISTRY_ROOTS = [
 ] as const
 const WINDOWS_REGISTRY_OUTPUT_MAX_BYTES = 1024 * 1024
 const WINDOWS_ELECTRON_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u
-const DISCOVERY_STEP_TIMEOUT_MS = 3_000
+/**
+ * Per-subprocess limit for one Windows registry read.
+ *
+ * `reg query <root> /s` over a software-dense uninstall tree takes seconds, not
+ * milliseconds: the plain HKLM read alone exceedes a 3s cap on ordinary
+ * developer machines, and a cut-short enumeration reports the product as
+ * "could not complete" — a diagnosis that reads like "not installed" while the
+ * app is sitting right there. The whole-discovery budget below is what actually
+ * bounds the user's wait, so this limit only decides whether a read that would
+ * have finished inside that budget is allowed to.
+ *
+ * Invariant (asserted by tests): never above {@link DISCOVERY_BUDGET_MS}.
+ */
+const DISCOVERY_STEP_TIMEOUT_MS = 10_000
+/**
+ * Whole-discovery budget across every root and candidate check.
+ *
+ * This, not the per-step limit, is the effective ceiling during a real
+ * discovery: the budget's abort still fires on schedule, so raising the step
+ * limit cannot make a user wait longer.
+ */
 const DISCOVERY_BUDGET_MS = 10_000
 
 /** Whether every byte is ASCII, the one case where a decode cannot be wrong. */
@@ -486,7 +506,7 @@ export async function resolveElectronPath(
     if (!isExecutable(configured)) {
       throw new WorkBuddyElectronPathError(
         'electron-path-invalid',
-        `${product.envVar} names an Electron binary that is not executable: ${configured}`,
+        `${product.envVar} 指定的 Electron 不可执行：${configured}`,
       )
     }
     return configured
@@ -495,8 +515,8 @@ export async function resolveElectronPath(
     if (!isExecutable(product.macOS.defaultPath)) {
       throw new WorkBuddyElectronPathError(
         'electron-binary-not-found',
-        `no ${product.productName} Electron binary at the default path (the app may live elsewhere);`
-        + ` set ${product.envVar} to name it`,
+        `默认路径未找到 ${product.productName} 的 Electron 二进制（App 可能装在别处）；`
+        + `请用 ${product.envVar} 指定`,
       )
     }
     return product.macOS.defaultPath
@@ -504,7 +524,7 @@ export async function resolveElectronPath(
   if (platform !== 'win32') {
     throw new WorkBuddyElectronPathError(
       'electron-binary-unavailable',
-      `this platform has no default ${product.productName} Electron path; set ${product.envVar} to name it`,
+      `此平台没有默认的 ${product.productName} Electron 路径；请用 ${product.envVar} 指定`,
     )
   }
   const localAppData = env.LOCALAPPDATA?.trim()
@@ -562,27 +582,27 @@ async function discoverWindowsElectron(
     if (unresolved) {
       throw new WorkBuddyElectronPathError(
         'electron-discovery-incomplete',
-        `${product.productName} auto-location could not complete (some registry entries or candidates could not be checked);`
-        + ` this is not "not installed" — set ${product.envVar} to name its Electron binary`,
+        `${product.productName} 的自动定位未能完成（部分注册表项或候选无法检查）；`
+        + `这不代表未安装，可用 ${product.envVar} 指定其 Electron 二进制`,
       )
     }
     if (seen.size > 1) {
       const listed = [...seen.values()].map(path => `  - ${path}`).join('\n')
       throw new WorkBuddyElectronPathError(
         'electron-binary-ambiguous',
-        `found ${seen.size} ${product.productName} installs and cannot choose between them:\n${listed}\n`
-        + `set ${product.envVar} to name one`,
+        `找到 ${seen.size} 个 ${product.productName} 安装，无法自动选择：\n${listed}\n`
+        + `请用 ${product.envVar} 指定其中一个`,
       )
     }
     if (seen.size === 1) return [...seen.values()][0]!
     throw new WorkBuddyElectronPathError(
       'electron-binary-not-found',
       rejected.length === 0
-        ? `no ${product.productName} Electron binary found (neither the default location nor Windows uninstall records matched);`
-          + ` set ${product.envVar} to name it`
-        : `Windows uninstall records found ${rejected.length} ${product.productName} candidate(s), but`
-          + ` ${rejected.length > 1 ? 'none of them matches' : 'it does not match'} the expected app layout`
-          + ` (a version file and resources\\app.asar beside the exe); set ${product.envVar} to name its executable`,
+        ? `未找到 ${product.productName} 的 Electron 二进制（默认位置与 Windows 卸载记录均未命中）；`
+          + `可用 ${product.envVar} 显式指定`
+        : `Windows 卸载记录找到 ${rejected.length} 个 ${product.productName} 候选，但`
+          + `均不符合预期的应用布局`
+          + `（exe 旁应有 version 文件与 resources\\app.asar）；可用 ${product.envVar} 指定其可执行文件`,
     )
   } finally {
     clearTimeout(timer)
@@ -790,14 +810,14 @@ function spawnPayload(electronPath: string, timeoutMs = 10_000, wsl = false): Pr
     }, (error, stdout) => {
       if (error !== null && error !== undefined) {
         reject(new KeyUnavailableError(
-          `the decryption key could not be obtained (${electronPath} `
-          + `${error.killed === true ? `timed out after ${timeoutMs}ms` : error.code !== undefined ? `exited with code ${error.code}` : 'could not start'})`,
+          `获取解密密钥失败（${electronPath} `
+          + `${error.killed === true ? `超时 ${timeoutMs}ms` : error.code !== undefined ? `退出码 ${error.code}` : '无法启动'}）`,
         ))
         return
       }
       const output = stdout.trim()
       if (output === '') {
-        reject(new KeyUnavailableError(`the decryption key could not be obtained (${electronPath} produced no output)`))
+        reject(new KeyUnavailableError(`获取解密密钥失败（${electronPath} 无输出）`))
         return
       }      resolve(output)
     })
@@ -850,7 +870,7 @@ export async function protectorKey(source?: KeySource): Promise<ProtectorKey> {
     inflightDefault ??= (async () => {
       const payload = parseAtRestPayload(await defaultKeySource())
       if (payload === undefined) {
-        throw new KeyUnavailableError('the decryption key payload is not valid (expected {version:1, atRestSecretKey})')
+        throw new KeyUnavailableError('解密密钥数据不合法（应为 {version:1, atRestSecretKey}）')
       }
       const key = deriveProtectorKey(payload.atRestSecretKey)
       return { key, keyId: keyIdOf(key) }
@@ -859,7 +879,7 @@ export async function protectorKey(source?: KeySource): Promise<ProtectorKey> {
   }
   const payload = parseAtRestPayload(await source())
   if (payload === undefined) {
-    throw new KeyUnavailableError('the decryption key payload is not valid (expected {version:1, atRestSecretKey})')
+    throw new KeyUnavailableError('解密密钥数据不合法（应为 {version:1, atRestSecretKey}）')
   }
   const key = deriveProtectorKey(payload.atRestSecretKey)
   return { key, keyId: keyIdOf(key) }
@@ -1036,7 +1056,7 @@ export class WorkBuddyAtRestKeyProvider {
    */
   async protectorKeyFor(requested: readonly string[]): Promise<Buffer> {
     if (requested.length === 0) {
-      throw new KeyUnavailableError('the encrypted desktop credential carries no key ids')
+      throw new KeyUnavailableError('加密的桌面凭据未携带任何密钥 id')
     }
     const cached = this.cache
     if (cached !== undefined && requested.includes(cached.keyId)) return cached.key
@@ -1062,7 +1082,7 @@ export class WorkBuddyAtRestKeyProvider {
     if (payload === undefined) {
       throw new WorkBuddyElectronPathError(
         'encrypted-credential-unreadable',
-        'the decryption key payload is not valid (expected {version:1, atRestSecretKey})',
+        '解密密钥数据不合法（应为 {version:1, atRestSecretKey}）',
       )
     }
     const key = deriveProtectorKey(payload.atRestSecretKey)
@@ -1080,25 +1100,42 @@ export class WorkBuddyAtRestKeyProvider {
     return await spawnPayload(electronPath, this.timeoutMs, this.wsl())
   }
 
-  /** The explicit path, the platform default, or discovery — in that order. */
+  /**
+   * The explicit path, the platform default, or discovery — in that order.
+   *
+   * The platform default is only a *default*, not a commitment: a machine that
+   * installed the app somewhere else has no file there, and returning that
+   * absent path would make the caller fail with `ENOENT` instead of falling
+   * through to registry discovery. The default therefore has to prove it
+   * exists before it is returned — that ordering is what makes a custom
+   * install location work at all.
+   */
   private async resolveElectronPath(): Promise<string> {
     if (this.explicitPath !== undefined) {
       // An explicit path is authoritative and never falls back: naming a
       // binary means "use this one", so an unusable one is an error.
       return this.explicitPath
     }
-    if (this.discovery !== 'none' && this.defaultPath !== undefined) {
-      return this.defaultPath
-    }
     if (this.discovery === 'none') {
       throw new WorkBuddyElectronPathError(
         'electron-binary-unavailable',
-        `no ${this.product.productName} Electron path is configured on this platform`
-        + ` and no automatic discovery is available; set ${this.product.envVar} to name its binary`,
+        `此平台未配置 ${this.product.productName} 的 Electron 路径`
+        + `，也没有可用的自动发现；请用 ${this.product.envVar} 指定其二进制`,
       )
     }
-    // Windows discovery runs through the registry seam the CN profile uses;
-    // macOS discovery is not yet exercised by this bundle.
+    if (this.defaultPath !== undefined && isExecutable(this.defaultPath)) {
+      return this.defaultPath
+    }
+    // The default location is empty, so the app lives somewhere else. Windows
+    // resolves it through uninstall records, which is the only discovery this
+    // bundle implements.
+    if (this.discovery !== 'windows-workbuddy') {
+      throw new WorkBuddyElectronPathError(
+        'electron-binary-not-found',
+        `默认位置未找到 ${this.product.productName} 的 Electron 二进制，`
+        + `且此平台没有可用的自动发现；请用 ${this.product.envVar} 显式指定`,
+      )
+    }
     const discovered = await discoverWindowsElectron(
       this.product,
       process.env,

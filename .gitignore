@@ -4,6 +4,11 @@ node_modules/
 .pnpm-home/
 
 # Build output（发布前 pnpm build 现编，不进版本库）
+#
+# `prepack` runs the build, so npm/pnpm installs from git or from the registry
+# both get a complete `lib/`. DSH's plugin manager installs with
+# --ignore-scripts, so a git-sourced install must point at a checkout that has
+# already been built once.
 lib/
 dist/
 *.tsbuildinfo

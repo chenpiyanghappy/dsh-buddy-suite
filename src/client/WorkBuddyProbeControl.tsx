@@ -126,7 +126,7 @@ const refreshStyle: CSSProperties = {
   color: 'var(--dsw-alias-label-tertiary)',
 }
 
-/** Tooltip bubble: the Fast Mode shape (nowrap, one line, above the control). */
+/** Tooltip bubble: the Fast Mode shape (one line, above the control). */
 const tooltipStyle: CSSProperties = {
   position: 'absolute',
   left: '50%',
@@ -142,6 +142,25 @@ const tooltipStyle: CSSProperties = {
   lineHeight: '18px',
   whiteSpace: 'nowrap',
   pointerEvents: 'none',
+}
+
+/**
+ * The tooltip when it has to explain something.
+ *
+ * A one-line tooltip sits above a composer control near the window edge, so a
+ * sentence of explanation would either run off-screen or stretch to the full
+ * viewport width. This variant wraps inside a bounded width instead: the
+ * outcome strings are sentences now, not labels, and `nowrap` is what would
+ * make them unreadable.
+ */
+const tooltipWrappingStyle: CSSProperties = {
+  ...tooltipStyle,
+  left: 'auto',
+  right: 0,
+  transform: 'none',
+  width: 'max-content',
+  maxWidth: 260,
+  whiteSpace: 'normal',
 }
 
 /** Confirmation bubble: same anchor, but interactive and allowed to wrap. */
@@ -212,7 +231,12 @@ const noteStyle: CSSProperties = {
   color: 'var(--dsw-alias-label-primary)',
   fontSize: 12,
   lineHeight: '18px',
-  whiteSpace: 'nowrap',
+  // The note carries a full explanation for the outcomes that need one, so it
+  // wraps inside a bounded width rather than stretching to a single line. The
+  // one-line outcomes ("Detected: low / high") simply do not reach the bound.
+  width: 'max-content',
+  maxWidth: 340,
+  whiteSpace: 'normal',
 }
 /**
  * The note's dismiss action. Outlined rather than bare text: inside an already
@@ -220,6 +244,8 @@ const noteStyle: CSSProperties = {
  * Matches the outlined pill convention the plugin's other secondary actions use.
  */
 const noteDismissStyle: CSSProperties = {
+  flex: '0 0 auto',
+  alignSelf: 'flex-start',
   padding: '2px 8px',
   border: '1px solid var(--dsw-alias-border-l2)',
   borderRadius: 6,
@@ -230,6 +256,16 @@ const noteDismissStyle: CSSProperties = {
   lineHeight: '18px',
   cursor: 'pointer',
 }
+
+/**
+ * The note's text cell: takes the remaining width and wraps.
+ *
+ * `minWidth: 0` is load-bearing. A flex child defaults to `min-width: auto`,
+ * which refuses to shrink below its own content width — so the longer outcome
+ * sentence would push the bubble wider than its `maxWidth` instead of wrapping
+ * inside it.
+ */
+const noteBodyStyle: CSSProperties = { flex: '1 1 auto', minWidth: 0 }
 
 /**
  * The feature's static inline label. Deliberately not a state readout — see the
@@ -501,13 +537,26 @@ function ModelProbe({ model, card, label, t }: {
     }
   }
 
+  // Composer visibility switches (issue: users with their own balance plugin,
+  // or users who switch providers, saw this seat twice). Absent on a host that
+  // predates the switch, in which case both annotations show as before.
+  const showCredit = status?.status === 'signed-in' ? status.ui?.showCreditBadge !== false : true
+  const showLevels = status?.status === 'signed-in' ? status.ui?.showReasoningLevels !== false : true
+
   // The badge reads the same status document the probe entry does, so it is
   // available exactly when a balance was answered — including for models that
   // have nothing to probe. A failed manual read hides it (never the old number
   // posing as fresh); the ↻ stays as the retry and is the seat's one re-read
   // affordance whatever the document says, which is also how the control
   // recovers from an unreadable first read.
-  const credit = creditFailed ? undefined : creditBadge(status, card, t)
+  //
+  // With the badge switched off, the ↻ goes with it: a refresh button with no
+  // number beside it is a control whose effect the user cannot see.
+  const credit = creditFailed || !showCredit ? undefined : creditBadge(status, card, t)
+
+  // Nothing at all to draw: the seat collapses instead of leaving an empty span
+  // holding space in the composer.
+  if (!showCredit && !showLevels) return null
 
   const text = tooltipText(t, model, { busy, result, failed })
   const disabled = busy || probe?.running === true || key === undefined
@@ -523,25 +572,31 @@ function ModelProbe({ model, card, label, t }: {
       onMouseEnter={() => { setTooltipVisible(true) }}
       onMouseLeave={() => { setTooltipVisible(false) }}
     >
-      {credit === undefined ? null : <span style={creditStyle}>{credit}</span>}
+      {/*
+        * The badge and its ↻ are one unit: the refresh exists to re-read the
+        * number, so it is hidden whenever no number is shown — either because
+        * the user switched the badge off, or because the last read failed.
+        */}
+      {showCredit && credit !== undefined && <span style={creditStyle}>{credit}</span>}
+      {showCredit && (
+        <button
+          type="button"
+          style={{ ...refreshStyle, opacity: refreshing ? 0.6 : 1, cursor: refreshing ? 'default' : 'pointer' }}
+          title={t('composerCreditRefresh')}
+          aria-label={t('composerCreditRefresh')}
+          aria-busy={refreshing}
+          disabled={refreshing}
+          onClick={() => { void checkNow() }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+            <path d="M20 12a8 8 0 1 1-2.34-5.66" />
+            <path d="M20 4v4h-4" />
+          </svg>
+        </button>
+      )}
 
-      <button
-        type="button"
-        style={{ ...refreshStyle, opacity: refreshing ? 0.6 : 1, cursor: refreshing ? 'default' : 'pointer' }}
-        title={t('composerCreditRefresh')}
-        aria-label={t('composerCreditRefresh')}
-        aria-busy={refreshing}
-        disabled={refreshing}
-        onClick={() => { void checkNow() }}
-      >
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-          strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-          <path d="M20 12a8 8 0 1 1-2.34-5.66" />
-          <path d="M20 4v4h-4" />
-        </svg>
-      </button>
-
-      {visible && (
+      {showLevels && visible && (
         <button
           type="button"
           aria-label={text}
@@ -565,11 +620,11 @@ function ModelProbe({ model, card, label, t }: {
         </button>
       )}
 
-      {visible && showTooltip && (
-        <span id={tooltipId} role="tooltip" style={tooltipStyle}>{text}</span>
+      {showLevels && visible && showTooltip && (
+        <span id={tooltipId} role="tooltip" style={tooltipStyleFor(note)}>{text}</span>
       )}
 
-      {visible && confirming && (
+      {showLevels && visible && confirming && (
         <span style={confirmStyle}>
           <span>{t('probeBubbleBody')}</span>
           <span style={confirmRowStyle}>
@@ -583,9 +638,15 @@ function ModelProbe({ model, card, label, t }: {
         </span>
       )}
 
-      {visible && note !== undefined && (
+      {showLevels && visible && note !== undefined && (
         <span role="status" aria-live="polite" style={noteStyle}>
-          <span>{noteText(t, note)}</span>
+          {/*
+            * The text takes the remaining width and wraps; the dismiss button
+            * keeps its intrinsic size. Without `minWidth: 0` a flex child
+            * refuses to shrink below its content width, so the sentence would
+            * overflow the bubble instead of wrapping inside it.
+            */}
+          <span style={noteBodyStyle}>{noteText(t, note)}</span>
           <button
             type="button"
             style={noteDismissStyle}
@@ -599,6 +660,17 @@ function ModelProbe({ model, card, label, t }: {
       )}
     </span>
   )
+}
+
+/**
+ * Pick the tooltip geometry for the outcome it is about to show.
+ *
+ * The `non-validating` tooltip is a sentence that explains a mechanism, while
+ * every other tooltip is a short label ("Detected: low / high"). Only the
+ * sentence needs the bounded, wrapping variant at the control's right edge.
+ */
+function tooltipStyleFor(note: WorkBuddyWebProbeModel | undefined): CSSProperties {
+  return note?.validation === 'non-validating' ? tooltipWrappingStyle : tooltipStyle
 }
 
 /** Compose the one-line outcome string the note bubble shows. */

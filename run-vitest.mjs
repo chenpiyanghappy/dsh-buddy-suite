@@ -12,13 +12,18 @@
  * through `viteOverrides`, which vitest merges into the resolved config.
  */
 import { createVitest } from 'vitest/node'
+import { readFileSync } from 'node:fs'
+
+const PACKAGE_VERSION = JSON.parse(
+  readFileSync(new URL('./package.json', import.meta.url), 'utf8'),
+).version
 
 const vitest = await createVitest('test', {
   config: false,
   root: process.cwd(),
 }, {
   define: {
-    __DSH_BUDDY_SUITE_VERSION__: JSON.stringify('0.1.0'),
+    __DSH_BUDDY_SUITE_VERSION__: JSON.stringify(PACKAGE_VERSION),
   },
   test: {
     include: ['tests/**/*.spec.ts'],
@@ -31,6 +36,7 @@ const vitest = await createVitest('test', {
   },
 })
 
-const failures = await vitest.start()
+await vitest.start()
+const code = typeof vitest.exitCode === 'number' ? vitest.exitCode : 0
 await vitest.close()
-process.exit(failures ? 1 : 0)
+process.exit(code)

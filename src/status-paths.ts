@@ -78,9 +78,11 @@ export interface WorkBuddyProbeAction {
    * `probe` spends credit on one model; `clear` drops recorded observations;
    * `refresh` re-reads the credential and re-fetches the model catalog;
    * `set-maximum-context-window` persists the international card preference;
-   * `set-model-visibility` hides or shows one model for the signed-in account.
+   * `set-model-visibility` hides or shows one model for the signed-in account;
+   * `set-composer-display` toggles the composer's credit badge or
+   * reasoning-level entry.
    */
-  action: 'probe' | 'clear' | 'refresh' | 'set-maximum-context-window' | 'set-model-visibility'
+  action: 'probe' | 'clear' | 'refresh' | 'set-maximum-context-window' | 'set-model-visibility' | 'set-composer-display'
   /** Target model id; required for `probe` and `set-model-visibility`. */
   model?: string
   /** Requested value for `set-maximum-context-window` and `set-model-visibility`. */
@@ -93,6 +95,10 @@ export interface WorkBuddyProbeAction {
    * signed-in account has moved on.
    */
   account?: string
+  /** Requested credit-badge visibility for `set-composer-display`. */
+  showCreditBadge?: boolean
+  /** Requested reasoning-level visibility for `set-composer-display`. */
+  showReasoningLevels?: boolean
 }
 
 /**
@@ -174,6 +180,18 @@ export interface WorkBuddyWebModelBadge {
   badges?: readonly string[]
   credits?: string
   rateUnknown?: true
+  /**
+   * Effort levels the *catalog* declares for this model, when it declares any.
+   *
+   * Carried so the probe panel can say what a model will actually use when a
+   * detection concludes its effort parameter is not checked. A model that
+   * ignores `reasoning_effort` still runs at some level, and the catalog row
+   * names it — reporting "not adjustable" without that level leaves the reader
+   * unable to tell what the model is doing instead.
+   */
+  declaredEfforts?: readonly string[]
+  /** The effort the upstream uses when none is chosen, when it declares one. */
+  defaultEffort?: string
   contextWindow?: number
   defaultContextWindow?: number
   maxContextWindow?: number
@@ -242,8 +260,29 @@ export type WorkBuddyWebStatus =
     useMaximumContextWindow?: boolean
     visibility?: WorkBuddyWebVisibilitySection
     probeKey?: string
+    /**
+     * Which composer annotations this plugin should render.
+     *
+     * Read by the composer control, which owns the credit badge and the
+     * reasoning-level entry. Absent on a host that predates the switch, in
+     * which case the control shows both — the pre-switch behaviour.
+     */
+    ui?: WorkBuddyWebUiPreferences
   }
   | { status: 'error'; message: string }
+
+/**
+ * Composer-chrome visibility, as the browser half reads it.
+ *
+ * Mirrors `ui-preferences.ts` without importing it: that module reads and
+ * writes files, and the browser bundle must stay free of Node built-ins.
+ */
+export interface WorkBuddyWebUiPreferences {
+  /** Render the account's remaining credit beside the composer. */
+  showCreditBadge: boolean
+  /** Render the reasoning-level entry beside the composer. */
+  showReasoningLevels: boolean
+}
 
 /**
  * One account's check-in outcome, as the details panel displays it.

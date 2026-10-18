@@ -143,10 +143,24 @@ export interface WorkBuddyVariant {
   probePath: string
 }
 
-/** CN WorkBuddy first: the existing provider keeps its id, paths, and copy. */
+/**
+ * CN WorkBuddy first.
+ *
+ * The ids are namespaced to this bundle rather than reusing the bare
+ * `workbuddy` / `workbuddy-ai` that dsh-workbuddy-connect registers. A provider
+ * id is a key the host's model registry holds once, so two bundles claiming the
+ * same id means one silently replaces the other — installing both made the
+ * model group and its cards flip depending on load order. A distinct pair lets
+ * the two plugins coexist: the picker shows this bundle's group beside the
+ * other's, and a profile that pins `workbuddy/<model>` as its default keeps
+ * working because the other plugin still owns that id.
+ *
+ * Display names stay "WorkBuddy" and "WorkBuddy AI": the ids are internal, the
+ * names are what the user reads.
+ */
 export const WORKBUDDY_VARIANTS: readonly WorkBuddyVariant[] = [
   {
-    id: 'workbuddy',
+    id: 'workbuddy-suite',
     displayName: 'WorkBuddy',
     appName: 'WorkBuddy',
     region: 'cn',
@@ -161,7 +175,7 @@ export const WORKBUDDY_VARIANTS: readonly WorkBuddyVariant[] = [
     probePath: WORKBUDDY_PROBE_PATH,
   },
   {
-    id: 'workbuddy-ai',
+    id: 'workbuddy-ai-suite',
     displayName: 'WorkBuddy AI',
     appName: 'WorkBuddy AI',
     region: 'global',

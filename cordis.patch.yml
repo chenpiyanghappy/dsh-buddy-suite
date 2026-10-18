@@ -1,7 +1,12 @@
-# Register the WorkBuddy provider without changing the profile's current
+# Register this bundle's providers without changing the profile's current
 # default model. The plugin reuses the WorkBuddy desktop app's sign-in; no
-# separate OAuth flow is started. The check-in half needs no provider entry:
-# it registers only HTTP routes and a browser slot, so it adds nothing here.
+# separate OAuth flow is started.
+#
+# The node id is deliberately NOT `llm-workbuddy`: that id belongs to
+# dsh-workbuddy-connect, and a DSH profile indexes patch nodes by id. Two
+# bundles inserting the same id mean the later one silently replaces the
+# earlier, so installing both plugins made the UI flip between them depending
+# on order. A distinct id lets both mount side by side.
 - insert:
-    - id: llm-workbuddy
+    - id: llm-workbuddy-suite
       name: dsh-buddy-suite

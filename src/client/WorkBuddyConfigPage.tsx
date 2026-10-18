@@ -11,7 +11,7 @@ import { CARD_VARIANTS, WorkBuddyPluginCard } from './WorkBuddyPluginCard.tsx'
 /** Props the Plugins page delivers to the bundle's configuration entry. */
 export type WorkBuddyConfigPageProps =
   PropsRuntime<'plugins.bundle.config'>
-  & PropsLocale<'settings.workbuddy'>
+  & PropsLocale<'settings.buddy-suite'>
 
 /**
  * The cards' list; the page supplies no other chrome. A semantic `<ul>` —

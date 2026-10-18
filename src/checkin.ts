@@ -190,6 +190,36 @@ function string(value: unknown): string | undefined {
 }
 
 /**
+ * Whether a decoded string still carries the lossy-decode marker `U+FFFD`.
+ *
+ * A replacement character in a nickname means the bytes were decoded under the
+ * wrong encoding somewhere upstream: the original text is unrecoverable, and
+ * showing it would put visible garbage in the panel under the user's own name.
+ */
+function hasReplacementCharacter(value: string): boolean {
+  return value.includes('\uFFFD')
+}
+
+/**
+ * A nickname fit for display, or undefined to fall back to the account id.
+ *
+ * Two conditions earn the fallback: the marker {@link hasReplacementCharacter}
+ * describes, and a string built entirely of C0/C1 control characters — both
+ * read as corruption rather than as a name. The fallback is deliberate: a uid
+ * is ugly but recognisable, while mojibake is unrecognisable *and* looks like
+ * the plugin mangled something.
+ */
+function displayNickname(value: unknown): string | undefined {
+  const text = string(value)
+  if (text === undefined) return undefined
+  // Control characters other than whitespace cannot appear in a real nickname.
+  const printable = text.replace(/[\p{Cc}\p{Cf}]/gu, '').trim()
+  if (printable === '') return undefined
+  if (hasReplacementCharacter(printable)) return undefined
+  return printable
+}
+
+/**
  * One backup file reduced to what discovery needs. `uid` and `domain` stay
  * plaintext in WorkBuddy 5.6's encrypted files; only the token (and nickname)
  * are sealed, so an encrypted backup is still attributable to its account.
@@ -246,35 +276,43 @@ function resolveUid(
 ): { credential?: BuddyCheckinCredential; reason?: string } {
   for (const file of files) {
     if (file.token !== undefined) {
+      const nickname = displayNickname(file.nickname)
       return {
         credential: {
           uid: file.uid,
           domain: file.domain,
           accessToken: file.token,
-          ...file.nickname === undefined ? {} : { nickname: file.nickname },
+          ...nickname === undefined ? {} : { nickname },
         },
       }
     }
     if (file.tokenEnvelope !== undefined && key !== undefined && key.keyId === file.tokenEnvelope.keyId) {
       const token = openAuthField(key.key, file.tokenEnvelope)
       if (token === undefined) continue
-      const nickname = file.nicknameEnvelope === undefined ? undefined : openAuthField(key.key, file.nicknameEnvelope)
+      const nickname = displayNickname(
+        file.nicknameEnvelope === undefined ? undefined : openAuthField(key.key, file.nicknameEnvelope),
+      )
       return {
         credential: {
           uid: file.uid,
           domain: file.domain,
           accessToken: token,
-          ...nickname === undefined || nickname === '' ? {} : { nickname },
+          ...nickname === undefined ? {} : { nickname },
         },
       }
     }
   }
   const encrypted = files.some(file => file.tokenEnvelope !== undefined)
+  // Written in Chinese on purpose: this text is rendered verbatim by the
+  // check-in panel, which is a Chinese UI. The browser half localizes its own
+  // copy through `locales.ts`, but these reasons are produced on the host and
+  // travel to the panel as-is, so English here would surface as untranslated
+  // text in an otherwise Chinese panel.
   const reason = encrypted && keyError !== undefined
-    ? `credential is encrypted and ${keyError}`
+    ? `凭据已加密，但解密密钥不可用：${keyError}`
     : encrypted
-      ? 'the credential is sealed under a key this WorkBuddy install cannot open (likely a backup from before the app was reinstalled); sign in to this account once in the WorkBuddy app to restore it'
-      : 'the credential file is not in a recognized format; sign in to this account once in the WorkBuddy app to restore it'
+      ? '凭据由旧密钥加密，当前 WorkBuddy 无法解开（可能是重装 App 之前的备份）；请在 WorkBuddy App 里重新登录该账号以恢复'
+      : '凭据文件格式无法识别；请在 WorkBuddy App 里重新登录该账号以恢复'
   return { reason }
 }
 
@@ -595,11 +633,15 @@ export async function run(path: string = statePath(), opts: BuddyCheckinRunOptio
   const ok = tried.filter(row => row.state !== 'failed').length
   // The panel-open rollover shows its outcome in the panel itself, so it skips
   // the notice: a notice would toast some later page load out of nowhere.
+  //
+  // Chinese on purpose: the notice is toasted verbatim in the corner of a
+  // Chinese UI, so an English sentence here would be the one untranslated thing
+  // on screen.
   const notice = opts.notice === false || tried.length === 0
     ? undefined
     : tried.some(row => row.state === 'failed')
-      ? `WorkBuddy check-in: ${ok}/${tried.length} accounts succeeded; the failed ones can be retried in the panel`
-      : `WorkBuddy daily check-in complete: ${ok} account(s)`
+      ? `WorkBuddy 签到：${ok}/${tried.length} 个账号成功，失败账号可在面板中重试`
+      : `WorkBuddy 已完成今日签到：${ok} 个账号`
   return await save({
     day,
     checkedAt: new Date().toISOString(),
@@ -645,12 +687,14 @@ export async function refreshBalances(
   const accountByUid = new Map(discovered.map(account => [account.uid, account]))
   const results = await Promise.all(previous.results.map(async row => {
     const account = accountByUid.get(row.uid)
+    // Chinese on purpose — these strings render verbatim inside the Chinese
+    // check-in panel (see the note on `resolveUid`).
     if (account === undefined) {
-      return { ...row, balanceError: unreadableByUid.get(row.uid) ?? 'no credential found; showing the last record' }
+      return { ...row, balanceError: unreadableByUid.get(row.uid) ?? '未找到登录凭据，显示上次记录' }
     }
     const total = await balance(account).catch(() => undefined)
     return total === undefined
-      ? { ...row, balanceError: 'balance read failed; showing the last record' }
+      ? { ...row, balanceError: '余额查询失败，显示上次记录' }
       : { ...row, balance: total, balanceCheckedAt: new Date().toISOString() }
   }))
   const latest = await load(path)

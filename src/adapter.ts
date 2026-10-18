@@ -20,8 +20,14 @@ import type { WorkBuddyProbeRecord } from './probe-store.ts'
 import type { WorkBuddyShim } from './shim.ts'
 import { normalizeCredits, type WorkBuddyRegion } from './upstream.ts'
 
-/** Provider route this bundle owns. */
-export const WORKBUDDY_PROVIDER = 'workbuddy'
+/**
+ * Default provider id for this bundle.
+ *
+ * Namespaced rather than the bare `workbuddy` that dsh-workbuddy-connect
+ * registers: the model registry holds one provider per id, so sharing it would
+ * make the two plugins overwrite each other instead of coexisting.
+ */
+export const WORKBUDDY_PROVIDER = 'workbuddy-suite'
 
 /** Provider idle ceiling while one stream read is outstanding. */
 export const WORKBUDDY_STREAM_IDLE_TIMEOUT_MS = 300_000

@@ -408,11 +408,11 @@ export class WorkBuddyCredentialStore {
     const credential = await this.current()
     if (credential === undefined) {
       const candidates = this.resolveDesktopCandidates()
-      const desktop = candidates.length > 0 ? candidates.join(' or ') : '(no desktop path on this platform)'
+      const desktop = candidates.length > 0 ? candidates.join(' 或 ') : '（此平台无默认路径）'
       const app = this.variant?.appName ?? 'WorkBuddy'
       throw new Error(
-        `workbuddy: no signed-in ${app} account found; sign in once in the ${app} desktop app`
-        + ` (expected ${desktop} or ${this.variant?.env ?? WORKBUDDY_AUTH_FILE_ENV}), or refresh an existing session`,
+        `workbuddy: 未找到已登录的 ${app} 账号；请在 ${app} 桌面 App 中登录一次`
+        + `（期望位置 ${desktop}，或由 ${this.variant?.env ?? WORKBUDDY_AUTH_FILE_ENV} 指定），或刷新现有登录状态`,
       )
     }
     if (!this.needsRefresh(credential)) return credential
@@ -469,7 +469,7 @@ export class WorkBuddyCredentialStore {
   private async refreshNow(credential: WorkBuddyCredential): Promise<WorkBuddyCredential> {
     if (credential.refreshToken === '') {
       if (credential.expiresAtMs > Date.now() + 30_000) return credential
-      throw new Error('workbuddy: access token expired and no refresh token is stored; sign in again in the WorkBuddy desktop app')
+      throw new Error('workbuddy: 访问令牌已过期且没有保存刷新令牌；请在 WorkBuddy 桌面 App 重新登录')
     }
     try {
       const outcome = await this.refresh(credential)
@@ -532,9 +532,9 @@ export class WorkBuddyCredentialStore {
       if (classification.format === 'absent') continue
       if (classification.format === 'unrecognized') {
         throw new Error(
-          `the desktop auth file at ${desktopPath} exists but is unreadable`
-          + ' (neither a plaintext credential nor a decodable WorkBuddy 5.6 envelope);'
-          + ' fix or remove the file — it outranks the plugin-owned credential copy',
+          `桌面授权文件存在但无法读取：${desktopPath}`
+          + '（既不是明文凭据，也不是可解的 WorkBuddy 5.6 信封）；'
+          + '请修复或删除该文件——它的优先级高于插件自留的凭据副本',
         )
       }
       return await this.openEncryptedDesktop(classification)
@@ -553,9 +553,9 @@ export class WorkBuddyCredentialStore {
       if (plaintext === undefined) {
         throw new WorkBuddyElectronPathError(
           'encrypted-credential-unreadable',
-          `the encrypted desktop credential's ${field.field} could not be decrypted`
-          + ` (envelope key id ${field.envelope.keyId});`
-          + ' the WorkBuddy app may hold a different at-rest key — open it once to reseal the sign-in',
+          `加密凭据的 ${field.field} 无法解密`
+          + `（信封密钥 id ${field.envelope.keyId}）；`
+          + 'WorkBuddy App 可能持有不同的静态密钥——打开 App 一次以重新封存登录状态',
         )
       }
       return plaintext
