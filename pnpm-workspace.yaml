@@ -1,0 +1,16 @@
+# pnpm 11 configuration.
+#
+# The bundle targets one DSH kernel line (0.2.1-rc.2) and pins its peers to it,
+# so the release-age guard is exempted for exactly the packages this plugin
+# must match — publish-time delay is meant to protect against supply-chain
+# surprises, not to block a deliberate pin to the host's own generation.
+packages:
+  - .
+
+allowBuilds:
+  '@google/genai': true
+  protobufjs: true
+
+minimumReleaseAgeExclude:
+  - '@deepseek-ai/*'
+  - '@earendil-works/pi-ai'

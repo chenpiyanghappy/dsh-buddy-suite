@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+.pnpm-home/
+
+# Build output（发布前 pnpm build 现编，不进版本库）
+lib/
+dist/
+*.tsbuildinfo
+
+# Cache & local tooling
+.cache/
+.dsh-test/
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+.DS_Store
+
+# Editor / OS
+.idea/
+.vscode/
+Thumbs.db
