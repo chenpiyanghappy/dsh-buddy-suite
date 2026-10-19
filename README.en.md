@@ -12,8 +12,8 @@ It is built on two same-lineage projects,
 [dsh-buddy-checkin](https://github.com/corrinehu/dsh-buddy-checkin)
 (daily check-in), and merges them into one bundle.
 
-> **Status: 0.1.0, pre-release.** See [KNOWN-ISSUES.md](./KNOWN-ISSUES.md) for
-> what is verified, what is not, and what must be fixed before publishing. In
+> **Status: 0.1.1, released.** See [KNOWN-ISSUES.md](./KNOWN-ISSUES.md) for
+> what is verified, what is not, and remaining known issues. In
 > short: the check-in and model halves both work on Windows against a real
 > account; Linux, macOS, and the international app are untested.
 

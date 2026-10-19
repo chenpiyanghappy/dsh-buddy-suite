@@ -1,6 +1,6 @@
 # DSH Buddy Suite
 
-> **状态**：已发布 `v0.1.0` ✅ — [GitHub](https://github.com/chenpiyanghappy/dsh-buddy-suite) · [CNB](https://cnb.cool/chenpiyanghappy/dsh-buddy-suite) · [npm](https://www.npmjs.com/package/dsh-buddy-suite)
+> **状态**：已发布 `v0.1.1` ✅ — [GitHub](https://github.com/chenpiyanghappy/dsh-buddy-suite) · [CNB](https://cnb.cool/chenpiyanghappy/dsh-buddy-suite) · [npm](https://www.npmjs.com/package/dsh-buddy-suite)
 
 > 把 WorkBuddy 国内版账号的「模型接入」与「每日签到」合成**一个** DeepSeek Harness 插件。
 
@@ -36,7 +36,7 @@ pnpm check     # 类型检查 + 测试 + 构建
 npm install dsh-buddy-suite
 ```
 
-安装后由 DeepSeek Harness 按 cordis 插件方式加载（通过 `cordis.patch.yml`）。当前最新版本 `v0.1.0`，发布渠道：
+安装后由 DeepSeek Harness 按 cordis 插件方式加载（通过 `cordis.patch.yml`）。当前最新版本 `v0.1.1`，发布渠道：
 
 - **GitHub**：https://github.com/chenpiyanghappy/dsh-buddy-suite
 - **CNB**：https://cnb.cool/chenpiyanghappy/dsh-buddy-suite
