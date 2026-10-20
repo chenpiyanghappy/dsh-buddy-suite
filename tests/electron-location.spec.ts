@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   CN_ELECTRON_PROFILE,
   WorkBuddyAtRestKeyProvider,
+  WorkBuddyElectronPathError,
   electronDiscoveryFor,
 } from '../src/desktop-credential-protection.ts'
 
@@ -45,11 +46,16 @@ async function tempDir(prefix: string): Promise<string> {
 /** Build a layout-valid fake WorkBuddy install; returns its exe path. */
 async function fakeInstall(): Promise<string> {
   const root = await tempDir('buddy-electron-install-')
-  await writeFile(join(root, 'WorkBuddy.exe'), '')
+  const exe = join(root, 'WorkBuddy.exe')
+  await writeFile(exe, '')
+  // `isExecutable()` uses accessSync(X_OK). A 0644 file passes on Windows
+  // (where the bit is meaningless) but fails on Linux/macOS, which is why CI
+  // on ubuntu-latest rejected the fake install as "not a binary".
+  await chmod(exe, 0o755)
   await writeFile(join(root, 'version'), '37.10.3-24')
   await mkdir(join(root, 'resources'), { recursive: true })
   await writeFile(join(root, 'resources', 'app.asar'), '')
-  return join(root, 'WorkBuddy.exe')
+  return exe
 }
 
 /** The helper payload a real Electron would print. */
@@ -83,12 +89,24 @@ describe('a platform default is a candidate, not a commitment', () => {
 
     const spawned: string[] = []
     const provider = new WorkBuddyAtRestKeyProvider(
-      providerOptions(spawned, { defaultElectronPath: join(emptyLocal, 'Programs', 'WorkBuddy', 'WorkBuddy.exe') }) as never,
+      providerOptions(spawned, {
+        defaultElectronPath: join(emptyLocal, 'Programs', 'WorkBuddy', 'WorkBuddy.exe'),
+        // A 1ms budget aborts discovery before its first registry read on any
+        // platform. Without it this spec waits on a real `reg.exe` enumera-
+        // tion on a Windows runner (observed: >5s, i.e. a test timeout) and on
+        // Linux never gets past `ENOENT`. The `tools` option cannot help here:
+        // it is only wired into macOS discovery, while `discoverWindowsElectron`
+        // takes an injectable `registry` that the provider never threads through.
+        discoveryBudgetMs: 1,
+      }) as never,
     )
-    // Discovery cannot reach a real registry in a unit test, so the call is
-    // expected to fail — what matters is that it did *not* spawn the absent
-    // default and that discovery was attempted rather than short-circuited.
-    await expect(provider.protectorKeyFor(['0000000000000000'])).rejects.toThrow()
+    // The call is expected to fail — what matters is that it did *not* spawn the
+    // absent default and that discovery ran (its own failure code, not the
+    // "this platform has no discovery" path).
+    const error = await provider.protectorKeyFor(['0000000000000000']).catch((thrown: unknown) => thrown)
+    expect(error).toBeInstanceOf(WorkBuddyElectronPathError)
+    expect(['electron-discovery-incomplete', 'electron-binary-not-found'])
+      .toContain((error as WorkBuddyElectronPathError).reasonCode)
     expect(spawned).toEqual([])
     expect(installed).toContain('WorkBuddy.exe')
   })
