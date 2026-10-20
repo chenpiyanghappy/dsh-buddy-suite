@@ -46,7 +46,8 @@
     "README.md",
     "README.en.md",
     "KNOWN-ISSUES.md",
-    "LICENSE"
+    "LICENSE",
+    "NON-GOALS.md"
   ],
   "scripts": {
     "build": "tsdown",
