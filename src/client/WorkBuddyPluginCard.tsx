@@ -13,6 +13,10 @@ import type { WorkBuddyWebCreditExpiry } from '../status-paths.ts'
 import type { WorkBuddySignedOutReasonCode, WorkBuddyWebModelBadge, WorkBuddyWebProbeModel, WorkBuddyWebProbeSection, WorkBuddyWebStatus, WorkBuddyWebUiPreferences, WorkBuddyWebVisibilitySection } from '../status-paths.ts'
 import { isWorkBuddyWebStatus } from './status-document.ts'
 import { rankedCandidates, probeChipText } from './probe-rows.ts'
+import { diagnoseProbeReason } from './probe-diagnosis.ts'
+import { buildDiagnosticsBundle, hasDiagnosableState } from './diagnostics.ts'
+import { BUDDY_SUITE_VERSION } from '../version.ts'
+import { MAX_REQUESTS_PER_MODEL, estimateBatchCost, formatCredits } from './probe-cost.ts'
 import type { WorkBuddySettingsKey } from './locales.ts'
 
 /** Localized copy injected by the browser-plugin registration. */
@@ -826,16 +830,7 @@ function ComposerSwitches({ ui, t, onChange, busy }: {
 }
 
 /** The probe detection section: candidates, recorded outcomes, and per-model actions. */
-/**
- * Worst-case requests one model's detection can spend.
- *
- * A baseline plus the floor retry, the sentinel, and one request per effort
- * level (five). Used only to price the batch confirmation: it is an upper bound,
- * not an estimate, because a model that answers "not adjustable" stops after
- * two requests and most rows do exactly that.
- */
-const MAX_REQUESTS_PER_MODEL = 8
-function ProbeSection({ probe, models, t, onDetect, onDetectAll, onClear, busy }: {
+function ProbeSection({ probe, models, t, onDetect, onDetectAll, onClear, onCopyDiagnostics, busy }: {
   probe: WorkBuddyWebProbeSection
   /** Catalog rows from the same status document, for candidate display names. */
   models: readonly WorkBuddyWebModelBadge[] | undefined
@@ -843,6 +838,8 @@ function ProbeSection({ probe, models, t, onDetect, onDetectAll, onClear, busy }
   onDetect: (modelId: string) => void
   onDetectAll: () => void
   onClear: () => void
+  /** Copy a shareable diagnostics bundle; resolves to whether it was copied. */
+  onCopyDiagnostics: () => Promise<boolean>
   busy: boolean
 }): React.ReactNode {
   // Which model is awaiting confirmation. Confirmation is inline for the same
@@ -852,6 +849,8 @@ function ProbeSection({ probe, models, t, onDetect, onDetectAll, onClear, busy }
   // Whether the batch's price is on screen. Separate from `pending` because the
   // row confirmation names one model while this one names a count.
   const [confirmingAll, setConfirmingAll] = useState(false)
+  /** Outcome of the last diagnostics copy, so the button can report itself. */
+  const [copyState, setCopyState] = useState<'idle' | 'busy' | 'copied' | 'failed'>('idle')
   // Which model this card last asked to detect. `busy` alone cannot answer
   // that — it is true for any in-flight request — so the running label needs
   // the id, otherwise every candidate button claims to be running at once.
@@ -895,6 +894,12 @@ function ProbeSection({ probe, models, t, onDetect, onDetectAll, onClear, busy }
     const result = probe.results.find(entry => entry.id === id)
     return result === undefined || result.validation === 'unknown'
   })
+  /**
+   * The batch's price, or `undefined` when the catalog quotes no rate for any of
+   * it. `undefined` keeps the confirmation from implying "free".
+   */
+  const priced = estimateBatchCost(models ?? [], unresolved)
+  const costEstimate = priced.typical > 0 && priced.unpriced < unresolved.length ? priced : undefined
   return (
     <div style={quotaListStyle}>
       <h3 style={quotaTitleStyle}>{t('probeHeading')}</h3>
@@ -921,6 +926,22 @@ function ProbeSection({ probe, models, t, onDetect, onDetectAll, onClear, busy }
                   maxRequests: unresolved.length * MAX_REQUESTS_PER_MODEL,
                 })}
               </p>
+              {/*
+                * A request count is not a price. The catalog quotes a
+                * per-request multiplier, so the confirmation states the money
+                * too — typical and worst case, because a model that answers
+                * "not adjustable" stops after two requests while a validating
+                * one spends one per level.
+                */}
+              {costEstimate === undefined ? null : (
+                <p style={bodyStyle}>
+                  {t('probeBatchCost', {
+                    typical: formatCredits(costEstimate.typical),
+                    worst: formatCredits(costEstimate.worst),
+                  })}
+                  {costEstimate.unpriced === 0 ? '' : ` ${t('probeBatchCostUnpriced', { count: costEstimate.unpriced })}`}
+                </p>
+              )}
               <div style={confirmRowStyle}>
                 <button type="button" style={buttonStyle} onClick={() => { setConfirmingAll(false) }}>
                   {t('cancel')}
@@ -992,8 +1013,17 @@ function ProbeSection({ probe, models, t, onDetect, onDetectAll, onClear, busy }
                             * The chip text also names the level the catalog
                             * declares, so a "not adjustable" row still says
                             * what the model runs at. See `probeChipText`.
+                            * A failed detection shows its diagnosis here and
+                            * keeps the raw upstream text for the note bubble.
                             */}
-                          {probeChipText(result, models?.find(model => model.id === id), t)}
+                          {probeChipText(
+                            result,
+                            models?.find(model => model.id === id),
+                            t,
+                            diagnoseProbeReason(result.reason) === undefined
+                              ? undefined
+                              : t(diagnoseProbeReason(result.reason)!),
+                          )}
                         </span>
                       )}
                       <button
@@ -1051,11 +1081,35 @@ function ProbeSection({ probe, models, t, onDetect, onDetectAll, onClear, busy }
           </div>
         )}
 
-      {probe.results.length === 0 ? null : (
-        <button type="button" style={buttonStyle} disabled={busy} onClick={() => { onClear() }}>
-          {t('probeClear')}
+      <div style={confirmRowStyle}>
+        {probe.results.length === 0 ? null : (
+          <button type="button" style={buttonStyle} disabled={busy} onClick={() => { onClear() }}>
+            {t('probeClear')}
+          </button>
+        )}
+        {/*
+          * One click instead of the manual archaeology a failure otherwise
+          * needs: version, catalog source, every recorded observation with its
+          * raw reason, and the account's non-secret state, in one paste. The
+          * bundle strips the control key (see `diagnostics.ts`), so it is safe
+          * to paste into an issue or an agent session.
+          */}
+        <button
+          type="button"
+          style={buttonStyle}
+          disabled={busy}
+          onClick={() => {
+            setCopyState('busy')
+            void onCopyDiagnostics().then(copied => {
+              setCopyState(copied ? 'copied' : 'failed')
+            }, () => { setCopyState('failed') })
+          }}
+        >
+          {copyState === 'copied'
+            ? t('probeCopyDone')
+            : copyState === 'failed' ? t('probeCopyFailed') : t('probeCopyDiagnostics')}
         </button>
-      )}
+      </div>
     </div>
   )
 }
@@ -1186,6 +1240,34 @@ export function WorkBuddyPluginCard({ t, variant = CN_CARD_VARIANT }: WorkBuddyP
     void refresh(controller.signal)
     return () => { controller.abort() }
   }, [open, refresh])
+
+  /**
+   * Copy a self-contained report of the current state.
+   *
+   * Assembled from the document already on screen, so it costs no upstream
+   * request. The one field that must never leave the process is `probeKey`;
+   * `buildDiagnosticsBundle` removes it, and this function is the only caller.
+   */
+  const copyDiagnostics = useCallback(async (): Promise<boolean> => {
+    if (!hasDiagnosableState(status)) return false
+    const bundle = buildDiagnosticsBundle(status!, {
+      packageName: 'dsh-buddy-suite',
+      provider: variant.id,
+      // The build injects this constant into the browser bundle as well (see
+      // `VERSION_DEFINE`), so the version travels without a host round-trip. A
+      // report without it cannot be matched against the release that produced
+      // it, which is the first thing a maintainer asks.
+      version: BUDDY_SUITE_VERSION,
+    }, new Date().toISOString())
+    try {
+      await navigator.clipboard.writeText(`${JSON.stringify(bundle, null, 2)}\n`)
+      return true
+    } catch {
+      // Clipboard permission can be denied; reporting success would leave the
+      // user pasting whatever was copied last.
+      return false
+    }
+  }, [status, variant.id])
 
   useEffect(() => {
     // Gated on the last successful read, never on the rendered document: a
@@ -1543,6 +1625,7 @@ export function WorkBuddyPluginCard({ t, variant = CN_CARD_VARIANT }: WorkBuddyP
                           onDetect={confirmDetect}
                           onDetectAll={() => { void control({ action: 'probe-all' }) }}
                           onClear={() => { void control({ action: 'clear' }) }}
+                          onCopyDiagnostics={copyDiagnostics}
                         />
                       )}
                     </div>

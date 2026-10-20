@@ -38,6 +38,7 @@ import type { CSSProperties } from 'react'
 import type { ModelDirectory } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import { CARD_VARIANTS, type WorkBuddyCardVariant, type WorkBuddyPluginCardInjected } from './WorkBuddyPluginCard.tsx'
 import { isWorkBuddyWebStatus } from './status-document.ts'
+import { diagnoseProbeReason } from './probe-diagnosis.ts'
 import type { WorkBuddyWebProbeModel, WorkBuddyWebStatus } from '../status-paths.ts'
 
 /** Injected props; `directory` resolves the session's current model selection. */
@@ -337,12 +338,14 @@ function tooltipText(
     return t('probeTooltipRetry')
   }
   if (state.failed) {
-    // A failure with a known cause names it; without one the tooltip stays
-    // the bare retry hint.
+    // A failure with a known cause names it in the user's language; the raw
+    // record stays in the note bubble and in the state file.
     const reason = state.failureReason
-    return reason === undefined || reason === ''
-      ? t('probeTooltipRetry')
-      : t('probeTooltipFailedReason', { reason })
+    if (reason === undefined || reason === '') return t('probeTooltipRetry')
+    const diagnosis = diagnoseProbeReason(reason)
+    return t('probeTooltipFailedReason', {
+      reason: diagnosis === undefined ? reason : t(diagnosis),
+    })
   }
   return t('probeTooltipIdle', { model })
 }
@@ -706,9 +709,13 @@ function noteText(t: WorkBuddyPluginCardInjected['t'], result: WorkBuddyWebProbe
     return t('probeNoteVerified', { levels: result.efforts.join(' / ') })
   }
   if (result.validation === 'non-validating') return t('probeNoteNotValidating')
-  // The reason names the failing stage, so the user can act on it instead of
-  // retrying a detection that was never going to succeed.
   const reason = result.reason
   if (reason === undefined || reason === '') return t('probeNoteUnknown')
-  return t('probeNoteUnknownReason', { reason })
+  // The bubble has room for both: the sentence the user can act on, followed by
+  // the raw record in case they want to report it. The chip stays short (see
+  // `probeChipText`) because a pill cannot hold this much text.
+  const diagnosis = diagnoseProbeReason(reason)
+  return diagnosis === undefined
+    ? t('probeNoteUnknownReason', { reason })
+    : t('probeNoteUnknownDiag', { diagnosis: t(diagnosis), detail: reason })
 }

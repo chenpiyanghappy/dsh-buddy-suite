@@ -99,7 +99,7 @@ export function rankedCandidates(
 
 /** The locale binder this module needs; narrowed to the keys it reads. */
 export type ProbeChipTranslator = (
-  key: 'probeResultNotValidating' | 'probeResultUnknown' | 'probeResultUnknownReason' | 'probeDeclaredSuffix',
+  key: 'probeResultNotValidating' | 'probeResultUnknown' | 'probeResultUnknownDiag' | 'probeDeclaredSuffix',
   params?: Record<string, unknown>,
 ) => string
 
@@ -115,22 +115,27 @@ export type ProbeChipTranslator = (
  * `declaredEfforts` wins over `defaultEffort` when both are present: it is the
  * full set the row declares, and naming the set says more than naming the one
  * level the upstream happens to pick.
+ *
+ * An inconclusive record shows the *diagnosis*, not the raw upstream text: a
+ * chip is a few words wide, and `sentinel status 400 (invalid_parameter_value):
+ * invalid_parameter_value: the request parameters were rejected by the model
+ * provider` overflowed the row without telling the reader anything they could
+ * act on. The raw detail stays available in the note bubble, where there is room
+ * for it.
  */
 export function probeChipText(
   result: WorkBuddyWebProbeModel,
   model: WorkBuddyWebModelBadge | undefined,
   t: ProbeChipTranslator,
+  diagnosis?: string,
 ): string {
   if (result.validation === 'validating' && result.efforts.length > 0) {
     return result.efforts.join(' / ')
   }
   if (result.validation !== 'non-validating') {
-    // An inconclusive detection carries the reason it could not be completed.
-    // Without it the chip is a dead end: the user cannot tell a refused
-    // request from one that never reached the upstream.
-    const reason = result.reason
-    if (reason === undefined || reason === '') return t('probeResultUnknown')
-    return t('probeResultUnknownReason', { reason })
+    return diagnosis === undefined || diagnosis === ''
+      ? t('probeResultUnknown')
+      : t('probeResultUnknownDiag', { diagnosis })
   }
   const declared = (model?.declaredEfforts?.length ?? 0) > 0
     ? model!.declaredEfforts!.join(' / ')

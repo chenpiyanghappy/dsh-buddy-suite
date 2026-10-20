@@ -2,7 +2,9 @@
 
 [![Listed on dsh-plugin.org](https://dsh-plugin.org/badges/listed.svg)](https://dsh-plugin.org/plugins/chenpiyanghappy/dsh-buddy-suite)
 
-> **状态**：已发布 `v0.1.1` ✅ — [GitHub](https://github.com/chenpiyanghappy/dsh-buddy-suite) · [CNB](https://cnb.cool/chenpiyanghappy/dsh-buddy-suite) · [npm](https://www.npmjs.com/package/dsh-buddy-suite)
+中文 | [English](./README.en.md)
+
+> **状态**：已发布 `v0.1.2` ✅ — [GitHub](https://github.com/chenpiyanghappy/dsh-buddy-suite) · [CNB](https://cnb.cool/chenpiyanghappy/dsh-buddy-suite) · [npm](https://www.npmjs.com/package/dsh-buddy-suite)
 
 > 把 WorkBuddy 桌面端的模型接入 DeepSeek Harness，并自动完成每日签到。**模型接入同时覆盖国内版（WorkBuddy）与国际版（WorkBuddy AI）两套账号**；签到面向本机全部国内版账号。
 
@@ -85,7 +87,7 @@ dsh plugin --profile web add dsh-buddy-suite
 npm install dsh-buddy-suite
 ```
 
-安装后由 DeepSeek Harness 按 cordis 插件方式加载（通过 `cordis.patch.yml`）。当前最新版本 `v0.1.1`，发布渠道：
+安装后由 DeepSeek Harness 按 cordis 插件方式加载（通过 `cordis.patch.yml`）。当前最新版本 `v0.1.2`，发布渠道：
 
 - **GitHub**：https://github.com/chenpiyanghappy/dsh-buddy-suite
 - **CNB**：https://cnb.cool/chenpiyanghappy/dsh-buddy-suite

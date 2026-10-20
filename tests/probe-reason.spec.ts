@@ -136,12 +136,14 @@ describe('probe record reason', () => {
 describe('probe chip text with a reason', () => {
   const t: ProbeChipTranslator = (key, params) => {
     if (key === 'probeResultUnknown') return '检测未完成'
-    if (key === 'probeResultUnknownReason') return `检测未完成 · ${String(params?.['reason'])}`
+    if (key === 'probeResultUnknownDiag') return `检测未完成 · ${String(params?.['diagnosis'])}`
     if (key === 'probeResultNotValidating') return '不可调档位 · 用默认档位'
     return '（目录声明）'
   }
 
-  it('names the reason when the detection could not be completed', () => {
+  it('shows the diagnosis, not the raw upstream text', () => {
+    // The chip is a few words wide: the raw record overflows the row without
+    // telling the reader anything they can act on.
     const model: WorkBuddyWebProbeModel = {
       id: 'glm-5.1',
       name: 'GLM-5.1',
@@ -150,7 +152,8 @@ describe('probe chip text with a reason', () => {
       probedAt: 0,
       reason: 'baseline status 400 (invalid_reasoning_effort)',
     }
-    expect(probeChipText(model, undefined, t)).toBe('检测未完成 · baseline status 400 (invalid_reasoning_effort)')
+    expect(probeChipText(model, undefined, t, '上游不接受这个推理档位'))
+      .toBe('检测未完成 · 上游不接受这个推理档位')
   })
 
   it('falls back to the plain wording when no reason was recorded', () => {

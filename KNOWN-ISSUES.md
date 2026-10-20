@@ -67,6 +67,9 @@
 | 拒绝「缺省档位」的模型判不出来 | `glm-5.1` 收到不带 `reasoning_effort` 的请求直接 400 / `1210`「the reasoning effort value is not supported by the current model」，基线永远失败，模型被误判为不可检测 | 基线改发目录声明的 `defaultEffort`（上游自己说该模型用的档位），不再省略字段；并改为按上游**错误消息**归属 effort 拒绝（CN 端复用泛化码 `1210`，仅凭错误码无法区分） |
 | 泛化码认不出 effort 拒绝 | `deepseek-v4-pro` 哨兵被拒（400 / `invalid_parameter_value`「the request parameters were rejected by the model provider」），因码不在识别表被判 `unknown`，一个本可验证的模型无法检测 | CN 端识别表补入 `invalid_parameter_value`；归因依据与上游泛化码一致：基线已用**除 effort 外完全相同**的请求通过，故该字段是拒绝的唯一差异 |
 | 失败模型只能逐个重试 | 面板一行一个「重新检测」，多个模型失败时要重复点很多次 | 新增**一键批量探测**：只访问尚未判定完成的候选，串行执行（永不并发，不与真实对话争用），按 5 秒一次的状态刷新显示 `已完成/总数` 进度，账号切换时自动中止；确认框先用最坏情况（每模型 8 次请求）报出上限再扣费 |
+| 失败信息看不懂 | 徽章直接贴上游英文原文（如 `sentinel status 400 (invalid_parameter_value): the request parameters were rejected by the model provider`），一个 pill 被撑爆且没有可执行信息 | 新增**错误诊断**：按失败阶段 + 错误码 + 上游消息归类为「请求没送达 / 登录失效 / 限流 / 上游报错 / 模型不存在 / 输出上限过低 / 上游拒绝档位 / 参数被拒」，徽章只显示短诊断，原始记录保留在气泡与状态文件里；未识别的错误不猜，回退原文 |
+| 报问题时靠人工翻文件 | 每次都要手动找探测记录、翻日志、截图 | 新增**一键复制诊断信息**：把版本、provider、目录来源、全部探测记录与原始失败原因打包成 JSON 写进剪贴板；打包时**强制剥除 `probeKey`**（进程内授权扣费的密钥），可直接贴给 Agent 或 issue |
+| 批量探测不知道要花多少 | 只提示「最多 N×8 次请求」，用户无法换算成积分 | 确认框增加**费用预估**：按目录标价算出「约 X 积分 / 最坏 Y 积分」，并对未标价的模型单独计数（不当作免费） |
 
 ### 已验证 ✅
 
@@ -156,4 +159,4 @@ pnpm run check
 pnpm run check:offline
 ```
 
-当前状态：typecheck 通过，139 个测试通过，三项自检通过。
+当前状态：typecheck 通过，172 个测试通过，三项自检通过。
