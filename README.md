@@ -15,7 +15,7 @@
 
 两半只共用一个**凭证解密模块**（用 App 自带的 Electron 解密本机 at-rest 凭证），彼此独立、任一半失败都不影响另一半。
 
-> **是的，它是一个替代品，不是补充品。** 装本插件即可，**不要再装** `dsh-workbuddy-connect` 或 `dsh-buddy-checkin`——它们分别是本插件的两半。`dsh-buddy-checkin` 自 `0.4.0`（2026-10-10）后未再更新，在新内核上会被 DSH 拒绝安装，签到这部分正是由本插件接手的。
+> **是的，它是一个替代品，不是补充品。** 装本插件即可，**不要再装** `dsh-workbuddy-connect` 或 `dsh-buddy-checkin`——它们分别是本插件的两半，签到这部分正是由本插件接手的。`dsh-buddy-checkin` 的 `0.4.1`（2026-10-19）已支持 DSH 0.2.1-rc.1 / rc.2，装上不会被拒绝安装；但它只管签到，模型接入仍需另装 connect，两边功能重复。
 
 ---
 
@@ -93,9 +93,10 @@ npm install dsh-buddy-suite
 
 安装后由 DeepSeek Harness 按 cordis 插件方式加载（通过 `cordis.patch.yml`）。当前最新版本 `v0.1.2`，发布渠道：
 
-- **GitHub**：https://github.com/chenpiyanghappy/dsh-buddy-suite
+- **GitHub（含 Release 产物）**：https://github.com/chenpiyanghappy/dsh-buddy-suite ｜ [Releases](https://github.com/chenpiyanghappy/dsh-buddy-suite/releases)
 - **CNB**：https://cnb.cool/chenpiyanghappy/dsh-buddy-suite
 - **npm**：https://www.npmjs.com/package/dsh-buddy-suite
+- **CNB npm 制品库**：https://npm.cnb.cool/chenpiyanghappy/dsh-buddy-suite-npm/-/packages/
 
 ## 功能要点
 
