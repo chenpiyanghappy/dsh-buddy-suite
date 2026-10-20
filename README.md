@@ -57,6 +57,10 @@
 
 ![批量探测结果](assets/screenshot-probe-batch-result.png)
 
+排查用 —— 每行都有「重新检测」，底部可「清除已探测结果」与「复制诊断信息」（贴给 Agent 或 issue）：
+
+![诊断操作：清除已探测结果 / 复制诊断信息](assets/screenshot-diagnostics-buttons.png)
+
 ---
 
 ## 安装与构建
