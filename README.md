@@ -23,6 +23,10 @@
 
 ![每日签到：已签到 +100 积分与剩余积分](assets/screenshot-checkin-panel.png)
 
+插件卡片 —— 「输入框显示」两个独立开关（余额速览 / 推理档位入口，可分别关闭），下方是推理档位检测与「一键探测未完成（12 个）」：
+
+![插件卡片：输入框显示开关与推理档位检测](assets/screenshot-plugin-card.png)
+
 模型选择器 —— WorkBuddy 国内版模型直接出现在 DSH 的模型列表里，右侧标出每次调用的积分单价：
 
 ![模型选择器：WorkBuddy 模型与积分单价](assets/screenshot-model-picker.png)
