@@ -19,6 +19,18 @@
 
 ## 截图
 
+模型选择器 —— WorkBuddy 国内版模型直接出现在 DSH 的模型列表里，右侧标出每次调用的积分单价：
+
+![模型选择器：WorkBuddy 模型与积分单价](assets/screenshot-model-picker.png)
+
+输入框旁的积分徽标 —— 随时看到当前账号剩余积分（可一键关闭，见下方「余额/档位显示开关」）：
+
+![输入框旁的积分徽标](assets/screenshot-composer-credit.png)
+
+推理档位选择器 —— 探测出可用档位后，直接在输入框切换：
+
+![推理档位选择器：Default / Low / High / Max](assets/screenshot-reasoning-levels.png)
+
 推理档位探测 —— DeepSeek-V4-Pro 检出 5 档（low / medium / high / xhigh / max）：
 
 ![推理档位探测：DeepSeek-V4-Pro 检出 5 档](assets/screenshot-probe-deepseek-v4-pro.png)
