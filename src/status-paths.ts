@@ -78,19 +78,29 @@ export interface WorkBuddyWebProbeSection {
   candidates: readonly string[]
   /** Recorded observations. */
   results: readonly WorkBuddyWebProbeModel[]
+  /**
+   * Position of a running batch: how many models it has finished out of how many
+   * it set out to visit.
+   *
+   * Absent outside a batch, and absent for a single-model run — a one-model
+   * detection already reports itself through `running` and the row's own
+   * button label, so a second progress mechanism would only add noise.
+   */
+  progress?: { done: number; total: number }
 }
 
 /** Action requested from the probe control route. */
 export interface WorkBuddyProbeAction {
   /**
-   * `probe` spends credit on one model; `clear` drops recorded observations;
+   * `probe` spends credit on one model; `probe-all` spends it on every model
+   * still awaiting a decisive result; `clear` drops recorded observations;
    * `refresh` re-reads the credential and re-fetches the model catalog;
    * `set-maximum-context-window` persists the international card preference;
    * `set-model-visibility` hides or shows one model for the signed-in account;
    * `set-composer-display` toggles the composer's credit badge or
    * reasoning-level entry.
    */
-  action: 'probe' | 'clear' | 'refresh' | 'set-maximum-context-window' | 'set-model-visibility' | 'set-composer-display'
+  action: 'probe' | 'probe-all' | 'clear' | 'refresh' | 'set-maximum-context-window' | 'set-model-visibility' | 'set-composer-display'
   /** Target model id; required for `probe` and `set-model-visibility`. */
   model?: string
   /** Requested value for `set-maximum-context-window` and `set-model-visibility`. */

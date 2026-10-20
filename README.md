@@ -4,9 +4,9 @@
 
 > **状态**：已发布 `v0.1.1` ✅ — [GitHub](https://github.com/chenpiyanghappy/dsh-buddy-suite) · [CNB](https://cnb.cool/chenpiyanghappy/dsh-buddy-suite) · [npm](https://www.npmjs.com/package/dsh-buddy-suite)
 
-> 把 WorkBuddy 国内版账号的「模型接入」与「每日签到」合成**一个** DeepSeek Harness 插件。
+> 把 WorkBuddy 桌面端的模型接入 DeepSeek Harness，并自动完成每日签到。**模型接入同时覆盖国内版（WorkBuddy）与国际版（WorkBuddy AI）两套账号**；签到面向本机全部国内版账号。
 
-`dsh-buddy-suite`（插件名 `llm-workbuddy`）是一个 [DeepSeek Harness](https://github.com/DeepSeek-V3/DeepSeek-Harness) 的 cordis 插件，把原本需要两个独立流程才能做完的事合并到一起：
+`dsh-buddy-suite`（插件节点 id `llm-workbuddy-suite`，provider `workbuddy-suite` / `workbuddy-ai-suite`）是一个 [DeepSeek Harness](https://github.com/DeepSeek-V3/DeepSeek-Harness) 的 cordis 插件，把原本需要两个独立流程才能做完的事合并到一起：
 
 1. **模型接入**：通过本机 loopback 的 OpenAI 兼容 shim，把 WorkBuddy 桌面客户端里的模型接入 DeepSeek Harness。支持 `cn` / `global` 两个区，覆盖流式对话、工具调用、推理力度档位、积分余额与过期预警。
 2. **每日签到**：在 DeepSeek Harness 启动与会话面板交互时，自动为所有本机 WorkBuddy 国内版账号完成每日签到（CN-only；国际账号会被上游私有端点拒绝）。签到幂等、失败重试、跨午夜惰性滚动。
@@ -38,6 +38,14 @@
 不可调档位的模型 —— GLM-5.1 被判定为「不可调档位」，回落到目录声明的默认档位（medium），而不是笼统的「检测未完成」：
 
 ![GLM-5.1 判定为不可调档位](assets/screenshot-probe-glm-5.1.png)
+
+一键批量探测 —— 把还没探测过的模型一次跑完（执行前会先报价）：
+
+![一键探测未完成（12 个）](assets/screenshot-probe-batch-button.png)
+
+批量探测完成 —— 12 个模型逐个给出结论（可调档位的显示档位，不可调的回落到默认档位）：
+
+![批量探测结果](assets/screenshot-probe-batch-result.png)
 
 ---
 
@@ -86,6 +94,11 @@ npm install dsh-buddy-suite
   - 扫 `CodeBuddyExtension/Data/Public/auth` 发现本机所有账号；明文 / at-rest key 双路解密凭证。
   - 仅在启动 + 面板交互时签（上游只认「今天」，定时任务纯属浪费请求）。
   - 已签 / 已领过的账号重启不再重复请求；失败项单独重试。
+- **推理档位探测（reasoning levels）**
+  - 逐模型探测该模型接受哪些推理档位；判定为不可调档位时回落到目录声明的默认档位，而不是笼统的「检测未完成」。
+  - **一键批量探测**：把还没探测过的模型一次跑完（卡片上显示剩余个数），执行前先按模型档位数**报价**再确认，避免一次批量探测悄悄吃掉大笔积分。
+  - 探测未完成时显示**具体原因**（被拒的是哪个参数、上游回了什么），不是一个无信息的死路。
+  - 探测结果按账号与 catalog 行指纹记账：目录行一变就重新探测，与上游插件**各存各的**，互不作废。
 - **安全边界**
   - 同源路由只收 loopback 请求（Host / Origin 双校验防 DNS 重绑定）。
   - 跨给浏览器的字段全部过滤 token（JWT 与 `token=xxx` 正则打码）。

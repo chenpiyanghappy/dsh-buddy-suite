@@ -96,6 +96,15 @@ export type WorkBuddyPluginCardProps = Partial<WorkBuddyPluginCardInjected>
 const POLL_INTERVAL_MS = 60_000
 
 /**
+ * Watch pace while a batch detection is running.
+ *
+ * The batch is a background job on the host, so the only way to see it move is
+ * to re-read the status document. Five seconds keeps a sweep of a dozen models
+ * visibly alive without turning the status route into a busy loop.
+ */
+const BATCH_POLL_INTERVAL_MS = 5_000
+
+/**
  * The reason codes whose failures the Agent assist block covers: the plugin
  * cannot reach a decryption program, for any of the five reasons in §5.5.
  *
@@ -817,12 +826,22 @@ function ComposerSwitches({ ui, t, onChange, busy }: {
 }
 
 /** The probe detection section: candidates, recorded outcomes, and per-model actions. */
-function ProbeSection({ probe, models, t, onDetect, onClear, busy }: {
+/**
+ * Worst-case requests one model's detection can spend.
+ *
+ * A baseline plus the floor retry, the sentinel, and one request per effort
+ * level (five). Used only to price the batch confirmation: it is an upper bound,
+ * not an estimate, because a model that answers "not adjustable" stops after
+ * two requests and most rows do exactly that.
+ */
+const MAX_REQUESTS_PER_MODEL = 8
+function ProbeSection({ probe, models, t, onDetect, onDetectAll, onClear, busy }: {
   probe: WorkBuddyWebProbeSection
   /** Catalog rows from the same status document, for candidate display names. */
   models: readonly WorkBuddyWebModelBadge[] | undefined
   t: WorkBuddyPluginCardInjected['t']
   onDetect: (modelId: string) => void
+  onDetectAll: () => void
   onClear: () => void
   busy: boolean
 }): React.ReactNode {
@@ -830,6 +849,9 @@ function ProbeSection({ probe, models, t, onDetect, onClear, busy }: {
   // reason the Composer entry uses a bubble: a modal alert for a one-line
   // decision is heavier than the action it guards.
   const [pending, setPending] = useState<string>()
+  // Whether the batch's price is on screen. Separate from `pending` because the
+  // row confirmation names one model while this one names a count.
+  const [confirmingAll, setConfirmingAll] = useState(false)
   // Which model this card last asked to detect. `busy` alone cannot answer
   // that — it is true for any in-flight request — so the running label needs
   // the id, otherwise every candidate button claims to be running at once.
@@ -860,12 +882,74 @@ function ProbeSection({ probe, models, t, onDetect, onClear, busy }: {
   // Rows ordered by information value, with duplicate names qualified. Both
   // lists are index-aligned, so the label and the id it acts on never diverge.
   const { ids: rowIds, labels } = rankedCandidates(probe.candidates, probe.results, models)
+  /**
+   * Candidates still awaiting a decisive answer — the batch's actual work list.
+   *
+   * Counted here rather than taken from the host so the confirmation can price
+   * the action in the same breath as offering it. The host recomputes the list
+   * when the action arrives; this number only has to be honest about what the
+   * user is agreeing to, and a card that is a second stale shows a number that
+   * is a second stale.
+   */
+  const unresolved = probe.candidates.filter(id => {
+    const result = probe.results.find(entry => entry.id === id)
+    return result === undefined || result.validation === 'unknown'
+  })
   return (
     <div style={quotaListStyle}>
       <h3 style={quotaTitleStyle}>{t('probeHeading')}</h3>
       <p style={bodyStyle}>{t('probeIntro')}</p>
       <p style={bodyStyle}>{t('probeConsentHint')}</p>
       {probe.running ? <p style={bodyStyle}>{t('probeRunningGeneric')}</p> : null}
+      {probe.progress === undefined ? null : (
+        <p style={bodyStyle}>{t('probeBatchProgress', { done: probe.progress.done, total: probe.progress.total })}</p>
+      )}
+      {/*
+        * One action for the whole work list, because the rows that fail are
+        * exactly the ones a user cannot clear one click at a time without
+        * repeating the same gesture over and over. The confirmation prices it
+        * before anything is spent: every model costs at least a baseline and a
+        * sentinel request, and a validating model costs one per level as well.
+        */}
+      {unresolved.length === 0 ? null : (
+        confirmingAll
+          ? (
+            <div style={confirmBoxStyle}>
+              <p style={bodyStyle}>
+                {t('probeBatchConfirm', {
+                  count: unresolved.length,
+                  maxRequests: unresolved.length * MAX_REQUESTS_PER_MODEL,
+                })}
+              </p>
+              <div style={confirmRowStyle}>
+                <button type="button" style={buttonStyle} onClick={() => { setConfirmingAll(false) }}>
+                  {t('cancel')}
+                </button>
+                <button
+                  type="button"
+                  style={primaryButtonStyle}
+                  disabled={probe.running || busy}
+                  onClick={() => {
+                    setConfirmingAll(false)
+                    onDetectAll()
+                  }}
+                >
+                  {t('probeBatchAction')}
+                </button>
+              </div>
+            </div>
+          )
+          : (
+            <button
+              type="button"
+              style={primaryButtonStyle}
+              disabled={probe.running || busy}
+              onClick={() => { setConfirmingAll(true) }}
+            >
+              {t('probeBatchStart', { count: unresolved.length })}
+            </button>
+          )
+      )}
       {/*
         * One row per probeable model, each carrying its own state and button.
         *
@@ -1116,6 +1200,24 @@ export function WorkBuddyPluginCard({ t, variant = CN_CARD_VARIANT }: WorkBuddyP
     }
   }, [open, refresh, signedIn])
 
+  /**
+   * A batch reports itself through the status document, which the card would
+   * otherwise re-read only once a minute — long enough for a multi-model sweep
+   * to look stuck. While one is running the card watches it at a pace that
+   * matches the work, and returns to the ordinary interval the moment the
+   * document stops saying `running`.
+   */
+  const batchRunning = status?.status === 'signed-in' && status.probe?.running === true
+  useEffect(() => {
+    if (!open || signedIn === false || !batchRunning) return
+    const controller = new AbortController()
+    const timer = window.setInterval(() => { void refresh(controller.signal) }, BATCH_POLL_INTERVAL_MS)
+    return () => {
+      window.clearInterval(timer)
+      controller.abort()
+    }
+  }, [open, refresh, signedIn, batchRunning])
+
   const manualRefresh = async (): Promise<void> => {
     setBusy(true)
     const controller = trackController()
@@ -1182,7 +1284,7 @@ export function WorkBuddyPluginCard({ t, variant = CN_CARD_VARIANT }: WorkBuddyP
    * the host never accepts a prompt, a sentinel, or a model outside its own
    * catalog from here.
    */
-  const control = useCallback(async (action: { action: 'probe'; model: string } | { action: 'clear' } | { action: 'set-maximum-context-window'; enabled: boolean } | { action: 'set-model-visibility'; model: string; visible: boolean; account: string } | { action: 'set-composer-display'; showCreditBadge?: boolean; showReasoningLevels?: boolean }): Promise<void> => {
+  const control = useCallback(async (action: { action: 'probe'; model: string } | { action: 'probe-all' } | { action: 'clear' } | { action: 'set-maximum-context-window'; enabled: boolean } | { action: 'set-model-visibility'; model: string; visible: boolean; account: string } | { action: 'set-composer-display'; showCreditBadge?: boolean; showReasoningLevels?: boolean }): Promise<void> => {
     const key = status?.status === 'signed-in' ? status.probeKey : undefined
     if (key === undefined) return
     // A visibility toggle runs on its own per-row in-flight set so the
@@ -1439,6 +1541,7 @@ export function WorkBuddyPluginCard({ t, variant = CN_CARD_VARIANT }: WorkBuddyP
                           t={t}
                           busy={busy}
                           onDetect={confirmDetect}
+                          onDetectAll={() => { void control({ action: 'probe-all' }) }}
                           onClear={() => { void control({ action: 'clear' }) }}
                         />
                       )}

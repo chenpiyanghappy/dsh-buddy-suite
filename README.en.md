@@ -3,8 +3,11 @@
 English | [中文](./README.md)
 
 **One plugin that does both WorkBuddy jobs**: it brings WorkBuddy desktop app
-models into DeepSeek Harness *and* runs the WorkBuddy CN daily check-in
-automatically at DSH startup.
+models into DeepSeek Harness *and* runs the WorkBuddy daily check-in
+automatically at DSH startup. Model access covers **both** the China app
+(WorkBuddy) and the international one (WorkBuddy AI); the check-in serves every
+local China account, because the international endpoint rejects check-ins
+upstream.
 
 It is built on two same-lineage projects,
 [dsh-workbuddy-connect](https://github.com/corrinehu/dsh-workbuddy-connect)

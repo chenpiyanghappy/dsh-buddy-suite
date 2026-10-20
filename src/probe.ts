@@ -123,15 +123,21 @@ export type ProbeRegion = 'cn' | 'global'
  *   sibling code in the same `11133` envelope that names another parameter
  *   (`integer_below_min_value`, the `max_tokens` floor) and a body carrying no
  *   `extError` at all (`11102`, unknown model) are therefore not mistaken for
- *   it, and neither is a level-sweep answer. It is *not* added to `cn`: that
- *   endpoint was measured answering the specific code, and reading a generic
- *   code there would widen attribution beyond what was observed.
+ *   it, and neither is a level-sweep answer.
+ * - `invalid_parameter_value` — the China endpoint, measured 2026-10-20 on
+ *   `deepseek-v4-pro`: the sentinel is answered `400` with "the request
+ *   parameters were rejected by the model provider". The prose names no
+ *   field, so it is readable for the same reason the global generic code is —
+ *   the baseline has already been accepted with the *same* request except for
+ *   `reasoning_effort`, which makes that field the only difference the
+ *   rejection can be about. The baseline's own `max_tokens` floor was proved
+ *   good by the accepted baseline, so this is not the `max_tokens` case.
  *
  * Neither is treated as a permanent protocol promise: anything unrecognized
  * still degrades to `unknown` rather than to a capability conclusion.
  */
 const INVALID_EFFORT_CODES: Record<ProbeRegion, ReadonlySet<string>> = {
-  cn: new Set(['invalid_reasoning_effort']),
+  cn: new Set(['invalid_reasoning_effort', 'invalid_parameter_value']),
   global: new Set(['invalid_reasoning_effort', 'model_param_invalid']),
 }
 

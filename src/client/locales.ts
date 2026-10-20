@@ -92,6 +92,10 @@ export const en = {
   probeResultVerified: 'Verified levels: {levels}',
   probeResultNotValidating: 'Not adjustable · default level',
   probeDeclaredSuffix: ' (catalogue declares {levels})',
+  probeBatchStart: 'Detect all unfinished models ({count})',
+  probeBatchConfirm: 'Detect {count} model(s) that have not been decided yet, one at a time. At most about {maxRequests} requests in total, and each may consume credit.',
+  probeBatchAction: 'Start batch detection',
+  probeBatchProgress: 'Detecting {done}/{total}…',
   probeResultUnknown: 'Detection did not complete',
   probeResultUnknownReason: 'Detection did not complete · {reason}',
   probeNoteUnknownReason: 'Detection did not complete. Reason: {reason}',
@@ -255,6 +259,10 @@ export const zh: Record<WorkBuddySettingsKey, string> = {
    * model is doing instead; naming that level closes the gap.
    */
   probeDeclaredSuffix: '（目录声明 {levels}）',
+  probeBatchStart: '一键探测未完成（{count} 个）',
+  probeBatchConfirm: '将逐个探测 {count} 个尚未判定完成的模型，总计最多约 {maxRequests} 次请求，每一次都可能消耗积分。',
+  probeBatchAction: '开始探测',
+  probeBatchProgress: '正在探测 {done}/{total}…',
   probeResultUnknown: '检测未完成',
   probeResultUnknownReason: '检测未完成 · {reason}',
   probeNoteUnknownReason: '检测未完成。原因：{reason}',

@@ -39,6 +39,13 @@ export interface WorkBuddyProbeRouteOptions {
    * upstream body.
    */
   probe: (modelId: string) => Promise<{ state: string; reason?: string }>
+  /**
+   * Probe every model still awaiting a decisive result, one at a time.
+   *
+   * Optional so a host that cannot run a batch simply does not advertise the
+   * action; the route answers `not-supported` rather than pretending.
+   */
+  probeAll?: () => { state: string; reason?: string; total?: number } | Promise<{ state: string; reason?: string; total?: number }>
   /** Drop every recorded observation. */
   clear: () => void
   /**
@@ -155,6 +162,7 @@ function parseAction(text: string): WorkBuddyProbeAction | undefined {
       ...levels === undefined ? {} : { showReasoningLevels: levels },
     }
   }
+  if (action === 'probe-all') return { action: 'probe-all' }
   if (action === 'probe') {
     const model = wrapped['model']
     if (typeof model !== 'string' || model.trim() === '') return undefined
@@ -198,6 +206,14 @@ export function workBuddyProbeHandler(
       if (action.action === 'clear') {
         deps.clear()
         json(res, 200, { state: 'cleared' })
+        return
+      }
+      if (action.action === 'probe-all') {
+        if (deps.probeAll === undefined) {
+          json(res, 404, { error: 'probe-all-not-supported' })
+          return
+        }
+        json(res, 200, await deps.probeAll())
         return
       }
       if (action.action === 'refresh') {

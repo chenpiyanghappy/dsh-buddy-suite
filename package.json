@@ -1,7 +1,7 @@
 {
   "name": "dsh-buddy-suite",
   "displayName": "DSH Buddy Suite",
-  "description": "把 WorkBuddy 国内版账号的「模型接入」与「每日签到」合成一个插件：自动签到所有本机账号，同时把 WorkBuddy 模型接进 DeepSeek Harness — WorkBuddy CN models plus automatic daily check-in in one plugin.",
+  "description": "把 WorkBuddy 桌面端的模型接入 DeepSeek Harness，并自动完成每日签到。模型接入覆盖国内版与国际版两套账号，签到覆盖本机全部国内版账号 — Bring WorkBuddy desktop models into DeepSeek Harness with automatic daily check-in: model access for both the China and international apps, check-in for every local China account.",
   "version": "0.1.1",
   "author": "chenpiyang",
   "keywords": [
@@ -9,6 +9,7 @@
     "deepseek-harness",
     "deepseek",
     "workbuddy",
+    "workbuddy-ai",
     "model-provider",
     "check-in"
   ],

@@ -127,3 +127,73 @@ describe('effort attribution by message', () => {
     expect(efforts).toHaveLength(1)
   })
 })
+
+/**
+ * A second generic rejection code, measured on a different model.
+ *
+ * `deepseek-v4-pro` answers the sentinel with `400 /\`invalid_parameter_value\``
+ * and "the request parameters were rejected by the model provider". The prose
+ * names no field, but the baseline carrying the identical request (bar the
+ * `reasoning_effort` value) had just been accepted, so that field is the only
+ * difference the rejection can be about — the same argument the global
+ * endpoint's generic code already rests on.
+ *
+ * Before this was recognised the model reported "sentinel status 400
+ * (invalid_parameter_value)" and stayed undetected even though it is a fully
+ * validating model.
+ */
+describe('generic parameter rejection on the sentinel', () => {
+  const invalidParameterValue: ProbeAttempt = {
+    status: 400,
+    streamed: false,
+    errorCode: 'invalid_parameter_value',
+    errorMessage: 'the request parameters were rejected by the model provider',
+    detail: 'invalid_parameter_value: the request parameters were rejected by the model provider',
+  }
+
+  it('treats it as an effort rejection once the baseline was accepted', async () => {
+    const { send } = scripted([
+      accepted,
+      invalidParameterValue,
+      accepted,            // low
+      accepted,            // medium
+      accepted,            // high
+      accepted,            // xhigh
+      accepted,            // max
+    ])
+    const outcome = await probeModel({ send, baselineEffort: 'high' })
+
+    expect(outcome.validation).toBe('validating')
+    if (outcome.validation !== 'validating') throw new Error('expected validating')
+    expect(outcome.efforts).toEqual(['low', 'medium', 'high', 'xhigh', 'max'])
+  })
+
+  it('drops a level the upstream rejects with the same code', async () => {
+    const { send } = scripted([
+      accepted,
+      invalidParameterValue,
+      invalidParameterValue, // low refused
+      accepted,              // medium
+      invalidParameterValue, // high refused
+      invalidParameterValue, // xhigh refused
+      invalidParameterValue, // max refused
+    ])
+    const outcome = await probeModel({ send, baselineEffort: 'high' })
+
+    expect(outcome.validation).toBe('validating')
+    if (outcome.validation !== 'validating') throw new Error('expected validating')
+    expect(outcome.efforts).toEqual(['medium'])
+  })
+
+  it('does not treat it as a rejection when the baseline itself failed', async () => {
+    // Without an accepted baseline nothing proves the request shape is sound,
+    // so the same body must stay inconclusive rather than be attributed.
+    const { send } = scripted([
+      { status: 400, streamed: false, errorCode: 'invalid_parameter_value', errorMessage: 'the request parameters were rejected by the model provider' },
+      { status: 400, streamed: false, errorCode: 'invalid_parameter_value', errorMessage: 'the request parameters were rejected by the model provider' },
+    ])
+    const outcome = await probeModel({ send, baselineEffort: 'high' })
+
+    expect(outcome.validation).toBe('unknown')
+  })
+})

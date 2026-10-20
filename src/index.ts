@@ -498,6 +498,9 @@ function probeSection(runtime: VariantRuntime, consent: boolean): WorkBuddyWebPr
     candidates: models.filter(isProbeCandidate).map(info => info.id),
     // Newest first: a detection the user just ran belongs at the top.
     results: newestFirst(results),
+    ...runtime.probeService.progress() === undefined
+      ? {}
+      : { progress: runtime.probeService.progress()! },
   }
 }
 
@@ -727,6 +730,29 @@ export function apply(ctx: Context, config: Config): void {
           const result = await runtime.probeService.probe(modelId, true)
           if (result.state === 'ok') runtime.invalidate()
           return result
+        },
+        probeAll: () => {
+          // Starts the sweep and returns at once. A batch over every unresolved
+          // model can run for minutes, and holding the browser's POST open for
+          // that long makes an ordinary long-running task look like a hung
+          // request; the card already reads the status document, which now
+          // carries `running` and `progress`, so the work is observable without
+          // keeping this response alive.
+          if (runtime.probeService.isRunning()) return { state: 'busy', reason: 'detection already running' }
+          // The host computes the work list rather than trusting one from the
+          // browser: a stale card must not make it probe a model the current
+          // catalog no longer offers.
+          const candidates = runtime.probeService.unresolvedCandidates()
+          if (candidates.length === 0) return { state: 'nothing-to-probe', total: 0 }
+          void runtime.probeService.probeMany(candidates, true)
+            .then(results => {
+              if (results.some(entry => entry.status.state === 'ok')) runtime.invalidate()
+            })
+            // Each model's own failure is contained in its status; this catch
+            // exists so a rejected batch cannot surface as an unhandled
+            // rejection in the host process.
+            .catch(() => { /* contained per model */ })
+          return { state: 'started', total: candidates.length }
         },
         clear: () => { runtime.probeStore.clear(); runtime.invalidate() },
         refresh: async () => {

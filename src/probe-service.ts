@@ -62,15 +62,24 @@ export class WorkBuddyProbeService {
   private readonly options: WorkBuddyProbeServiceOptions
   private queue: Promise<unknown> = Promise.resolve()
   private readonly pending = new Map<string, Promise<WorkBuddyProbeStatus>>()
-  private running = false
+  /**
+   * How many probes are in flight, counted rather than flagged.
+   *
+   * A batch holds one across the whole sweep while each model adds its own, so
+   * a boolean would be cleared by the first model that finished and the UI
+   * would stop reporting progress while the sweep was still running.
+   */
+  private active = 0
+  /** Position of a running batch, for the panel's progress line. */
+  private sweep: { done: number; total: number } | undefined
 
   constructor(options: WorkBuddyProbeServiceOptions) {
     this.options = options
   }
 
-  /** Whether a sweep is in flight right now. */
+  /** Whether a probe or a batch is in flight right now. */
   isRunning(): boolean {
-    return this.running
+    return this.active > 0
   }
 
   /**
@@ -143,7 +152,7 @@ export class WorkBuddyProbeService {
             this.options.client.probeEffort(credential, modelId, effort, signal, maxTokens)
         : this.options.send(modelId)
 
-      this.running = true
+      this.active += 1
       try {
         const outcome = await probeModel({
           send,
@@ -182,7 +191,7 @@ export class WorkBuddyProbeService {
         }
         return { state: 'ok', validation: outcome.validation, efforts: record.efforts, requests: outcome.requests }
       } finally {
-        this.running = false
+        this.active = Math.max(0, this.active - 1)
       }
     })
 
@@ -195,5 +204,65 @@ export class WorkBuddyProbeService {
     } finally {
       this.pending.delete(pendingKey)
     }
+  }
+
+  /**
+   * Probe several models, one after another, and report how far it got.
+   *
+   * Serial on purpose: the queue already guarantees one probe at a time so a
+   * user's real chat never contends with a sweep, and a batch is just that
+   * guarantee applied to a list. Requests are never fired concurrently — the
+   * upstream is asked one model at a time, in the order given.
+   *
+   * The sweep is not atomic: whatever completes is stored, and a model that
+   * fails does not stop the rest. Callers get one status per model, in order.
+   *
+   * An account switch ends the sweep early. Every remaining model would be
+   * probed under an identity the user did not consent to, and the per-model
+   * guard would discard the results anyway.
+   */
+  async probeMany(modelIds: readonly string[], manualConsent = false): Promise<{ modelId: string; status: WorkBuddyProbeStatus }[]> {
+    const startingAccount = this.options.account()
+    const results: { modelId: string; status: WorkBuddyProbeStatus }[] = []
+    this.active += 1
+    this.sweep = { done: 0, total: modelIds.length }
+    try {
+      for (const modelId of modelIds) {
+        if (this.options.account() !== startingAccount) break
+        results.push({ modelId, status: await this.probe(modelId, manualConsent) })
+        this.sweep.done = results.length
+      }
+    } finally {
+      this.sweep = undefined
+      this.active = Math.max(0, this.active - 1)
+    }
+    return results
+  }
+
+  /** How far a running batch has got, or `undefined` outside one. */
+  progress(): { done: number; total: number } | undefined {
+    return this.sweep === undefined ? undefined : { ...this.sweep }
+  }
+
+  /**
+   * The candidates a batch should visit: probeable models with no decisive
+   * observation yet.
+   *
+   * A model already answered `validating` or `non-validating` is settled, so
+   * including it would spend credit to re-learn what the store already holds.
+   * The rows this batch exists for are exactly the ones still showing "detection
+   * did not complete", which is the state a user cannot fix one click at a time
+   * without going row by row.
+   */
+  unresolvedCandidates(): string[] {
+    const account = this.options.account()
+    if (account === undefined) return []
+    return this.options.catalog.current()
+      .filter(info => info.reasoning?.supports === true && (info.reasoning.supportedEfforts?.length ?? 0) === 0)
+      .filter(info => {
+        const record = this.options.store.get(info.id, fingerprintModel(info), account)
+        return record === undefined || record.validation === 'unknown'
+      })
+      .map(info => info.id)
   }
 }
