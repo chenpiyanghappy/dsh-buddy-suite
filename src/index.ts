@@ -489,6 +489,7 @@ function probeSection(runtime: VariantRuntime, consent: boolean): WorkBuddyWebPr
       validation: record.validation,
       efforts: record.efforts,
       probedAt: record.probedAtMs,
+      ...record.reason === undefined ? {} : { reason: record.reason },
     }]
   })
   return {

@@ -22,8 +22,19 @@ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type { WorkBuddyModelInfo } from './catalog.ts'
 import type { WorkBuddyEffort } from './upstream.ts'
 
-/** Basename of the probe record inside the Harness home. */
-export const WORKBUDDY_PROBE_FILENAME = '.workbuddy-probe.json'
+/**
+ * Basename of the probe record inside the Harness home.
+ *
+ * Namespaced to this bundle. The upstream `dsh-workbuddy-connect` writes its
+ * own observations to `.workbuddy-probe.json`, and the two plugins share one
+ * account and one upstream endpoint — but their catalog rows differ by a
+ * field or two, so a record written by one plugin fails the other's
+ * fingerprint check and is discarded. Sharing the file therefore made each
+ * plugin silently void the other's paid-for probe results, forcing the user
+ * to re-probe (and re-pay) for the same model. A separate file per plugin
+ * keeps the two observation sets independent.
+ */
+export const WORKBUDDY_PROBE_FILENAME = '.buddy-suite-probe.json'
 
 /**
  * On-disk format this reader accepts; other versions are discarded.
@@ -79,6 +90,21 @@ export interface WorkBuddyProbeRecord {
    * account's own records intact rather than re-probing from scratch.
    */
   account: string
+  /**
+   * Why an `unknown` observation could not be completed, when there is one.
+   *
+   * `unknown` deliberately is not a negative claim: it says the probe learned
+   * nothing, and the difference between "the upstream refused the request" and
+   * "the request never reached it" decides what a user should do next. The
+   * probe service computes that explanation, but without this field it died at
+   * the process boundary and the file said only "unknown" — leaving no way to
+   * tell the two apart except by spending another round of credit.
+   *
+   * Optional, and only meaningful for `unknown`: a decisive observation has
+   * nothing to explain. Kept out of the fingerprint, so adding it never
+   * invalidates an existing record.
+   */
+  reason?: string
 }
 
 interface ProbeDocument {
@@ -146,6 +172,10 @@ function isRecord(value: unknown): value is WorkBuddyProbeRecord {
   if (typeof wrapped['account'] !== 'string' || wrapped['account'] === '') return false
   const efforts = wrapped['efforts']
   if (!Array.isArray(efforts) || efforts.some(effort => typeof effort !== 'string')) return false
+  // `reason` is optional: records written before it existed are still valid,
+  // they simply carry no explanation.
+  const reason = wrapped['reason']
+  if (reason !== undefined && typeof reason !== 'string') return false
   return true
 }
 
@@ -266,6 +296,7 @@ export class WorkBuddyProbeStore {
     validation: WorkBuddyProbeValidation,
     efforts: readonly WorkBuddyEffort[],
     account: string,
+    reason?: string,
   ): WorkBuddyProbeRecord {
     return {
       fingerprint,
@@ -276,6 +307,9 @@ export class WorkBuddyProbeStore {
       probedAtMs: this.now(),
       pluginVersion: this.pluginVersion,
       account,
+      // Only an inconclusive observation has anything to explain; a decisive
+      // one carries no reason, and an empty string is not a reason.
+      ...reason === undefined || reason === '' ? {} : { reason },
     }
   }
 

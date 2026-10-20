@@ -32,6 +32,8 @@ const cardSource = readFileSync(`${root}src/client/WorkBuddyPluginCard.tsx`, 'ut
 const OTHER_NODE_ID = 'llm-workbuddy'
 const OTHER_PROVIDER_IDS = ['workbuddy', 'workbuddy-ai']
 const OTHER_SLOT_IDS = ['workbuddy-update', 'workbuddy-probe']
+/** State-file basenames the other plugin writes under `$DSH_HOME`. */
+const OTHER_STATE_FILENAMES = ['.workbuddy-probe.json', '.workbuddy-ai-probe.json']
 
 describe('cordis patch node id', () => {
   it('does not reuse the other bundle\'s node id', () => {
@@ -83,5 +85,18 @@ describe('client slot entry ids', () => {
     // The check-in header entry exists only in this bundle, so its id is free —
     // but pinning it keeps the panel's registration identifiable.
     expect(clientEntry).toContain("id: 'buddy-checkin-header'")
+  })
+})
+
+describe('probe state file names', () => {
+  it('does not write the other bundle\'s state files', () => {
+    // Sharing one probe-state file meant each bundle's records failed the
+    // other's fingerprint check, so both silently discarded observations the
+    // user had already paid for.
+    for (const variant of WORKBUDDY_VARIANTS) {
+      for (const other of OTHER_STATE_FILENAMES) {
+        expect(variant.probeFilename).not.toBe(other)
+      }
+    }
   })
 })

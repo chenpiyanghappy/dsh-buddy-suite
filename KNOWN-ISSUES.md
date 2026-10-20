@@ -26,8 +26,16 @@
 | provider id | `workbuddy` / `workbuddy-ai` | `workbuddy-suite` / `workbuddy-ai-suite` |
 | 浮层 entry id | `workbuddy-update` | `workbuddy-suite-update` |
 | 推理控件 entry id | `workbuddy-probe` | `workbuddy-suite-probe` |
+| 探测状态文件名 | `.workbuddy-probe.json` | `.buddy-suite-probe.json` |
+| 国际版探测状态文件名 | `.workbuddy-ai-probe.json` | `.buddy-suite-ai-probe.json` |
 
 已在真实配置下验证两者可同时运行、无冲突报错。
+
+> **探测状态文件为什么必须分开**：探测记录带 catalog 行指纹，两个插件的 catalog 行只要差一个字段
+> （如 `supportsImages`），就互相认不出对方的记录——于是各自丢弃对方**已经付费探测过**的结果，
+> 用户被迫重复探测、重复消耗积分（GLM-5.1 一发 `x0.79 credits`，一轮 6~7 发）。
+> 旧文件**不迁移、不读取、不改写**：里面的记录混着 connect 的版本号，且可按需重建。
+> 本插件自己的旧记录（`kimi-k2.6`@0.1.0、`mimo-v2.6-pro`@0.1.1）如需保留需显式提出。
 
 **但推荐用法仍是只装本插件**，并移除 `dsh-workbuddy-connect`。移除后本插件独占，模型选择器只出现一个 WorkBuddy 分组。
 
@@ -52,6 +60,11 @@
 | 输入框控件无法关闭 | 已装余额插件的用户、多供应商切换的用户会看到重复控件 | 卡片内新增「输入框显示」两个独立开关，按机器保存 |
 | 界面显示 key 名 | 关闭 `dsh-workbuddy-connect` 后，卡片所有文案显示成 `title`、`accountHeading` 等标识符 | 换用本插件专属的 locale 命名空间 `settings.buddy-suite`（原与 connect 共用 `settings.workbuddy`，字典被抢）；并加兜底：查不到词条时回退内置中文表，不再回退为 key 名 |
 | 签到面板未汉化 | 结果、按钮、错误原因整块是英文，而面板本身是中文 | 面板与宿主侧的用户可见字符串全部改为中文；新增 `tests/localization.spec.ts` 守卫防复发 |
+| 探测结果互相作废 | 装了两个插件时，GLM-5.1 永远显示「检测未完成」，但另一插件确实探测过 | 探测状态文件按插件命名空间化（见上），两侧记录互不影响 |
+| 兜底目录能力信息失真 | 降级模式下 `glm-5.1` 谎报支持图片、`glm-5.3-flash` 谎报可关思考（上游返回 400） | 兜底目录逐字段对齐上游 `dsh-workbuddy-connect` 的 2026-10-17 快照（CN 19 个 / 国际 20 个模型，零差异） |
+| 探测失败原因被丢弃 | 探测失败只显示「检测未完成」，用户无法知道是上游拒绝还是请求根本没发出去 | `reason`（失败阶段 + 上游错误码 + 上游原始错误消息）随记录落盘，并显示在卡片徽章与输入框控件上 |
+| 基线请求被模型下限拒绝 | `glm-5.1` 永远「检测未完成」，实测原因是基线请求 `max_tokens: 1` 被拒（400 / `1210`），与推理档位无关 | 基线在 400 时用 `max_tokens: 16` 重试一次（国际版 GPT 系早有同类下限问题）；哨兵与档位探测仍用 1，不增加正常探测成本 |
+| 拒绝「缺省档位」的模型判不出来 | `glm-5.1` 收到不带 `reasoning_effort` 的请求直接 400 / `1210`「the reasoning effort value is not supported by the current model」，基线永远失败，模型被误判为不可检测 | 基线改发目录声明的 `defaultEffort`（上游自己说该模型用的档位），不再省略字段；并改为按上游**错误消息**归属 effort 拒绝（CN 端复用泛化码 `1210`，仅凭错误码无法区分） |
 
 ### 已验证 ✅
 
@@ -141,4 +154,4 @@ pnpm run check
 pnpm run check:offline
 ```
 
-当前状态：typecheck 通过，73 个测试通过，三项自检通过。
+当前状态：typecheck 通过，120 个测试通过，三项自检通过。

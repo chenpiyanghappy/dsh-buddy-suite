@@ -70,6 +70,7 @@ export const en = {
   probeTooltipVerified: 'Accepted levels: {levels} · click to detect again',
   probeTooltipNotValidating: 'Not adjustable here: this model ignores the effort parameter, so it always runs at its default level',
   probeTooltipRetry: 'Detection did not complete · click to retry',
+  probeTooltipFailedReason: 'Detection did not complete · {reason} · click to retry',
   probeBubbleBody: 'Send test requests to confirm the available reasoning levels. May consume a small amount of credit.',
   probeConfirmAction: 'Confirm',
   probeNoteVerified: 'Detected: {levels}',
@@ -92,6 +93,8 @@ export const en = {
   probeResultNotValidating: 'Not adjustable · default level',
   probeDeclaredSuffix: ' (catalogue declares {levels})',
   probeResultUnknown: 'Detection did not complete',
+  probeResultUnknownReason: 'Detection did not complete · {reason}',
+  probeNoteUnknownReason: 'Detection did not complete. Reason: {reason}',
   probeResultAt: 'Detected {time}',
   probeResultEmpty: 'No detectable models right now.',
   probeFailed: 'Detection failed: {message}',
@@ -224,6 +227,7 @@ export const zh: Record<WorkBuddySettingsKey, string> = {
    */
   probeTooltipNotValidating: '该模型无法调整推理档位（不检查推理强度参数），将使用其默认档位',
   probeTooltipRetry: '检测未完成 · 点击重试',
+  probeTooltipFailedReason: '检测未完成 · {reason} · 点击重试',
   probeBubbleBody: '发送探测请求以确认可用推理档位。可能消耗少量积分。',
   probeConfirmAction: '确认检测',
   probeNoteNotValidating: '该模型不检查推理强度（reasoning effort）参数：我们用一个不存在的档位测试，它同样正常返回，说明换档位不会改变行为。因此不提供档位选择，模型固定按其默认档位运行；这不是检测失败，无需处理。',
@@ -252,6 +256,8 @@ export const zh: Record<WorkBuddySettingsKey, string> = {
    */
   probeDeclaredSuffix: '（目录声明 {levels}）',
   probeResultUnknown: '检测未完成',
+  probeResultUnknownReason: '检测未完成 · {reason}',
+  probeNoteUnknownReason: '检测未完成。原因：{reason}',
   probeResultAt: '检测于 {time}',
   probeResultEmpty: '当前没有可检测的模型。',
   probeFailed: '检测失败：{message}',

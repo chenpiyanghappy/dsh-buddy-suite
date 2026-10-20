@@ -139,8 +139,8 @@ export class WorkBuddyProbeService {
       if (credential === undefined) return { state: 'unavailable', reason: 'no WorkBuddy credential' }
 
       const send = this.options.send === undefined
-        ? (effort: string | undefined, signal: AbortSignal) =>
-            this.options.client.probeEffort(credential, modelId, effort, signal)
+        ? (effort: string | undefined, signal: AbortSignal, maxTokens?: number) =>
+            this.options.client.probeEffort(credential, modelId, effort, signal, maxTokens)
         : this.options.send(modelId)
 
       this.running = true
@@ -148,6 +148,16 @@ export class WorkBuddyProbeService {
         const outcome = await probeModel({
           send,
           region: this.options.region,
+          // Some models refuse a request that omits `reasoning_effort`
+          // altogether (measured on `glm-5.1`: 400 / `1210` "the reasoning
+          // effort value is not supported by the current model"). The catalog's
+          // declared default is a value the upstream itself says the model
+          // uses, so the baseline sends it instead of omitting the field. When
+          // the row declares nothing there is nothing to send and the baseline
+          // omits as before.
+          ...current.reasoning?.defaultEffort === undefined
+            ? {}
+            : { baselineEffort: current.reasoning.defaultEffort },
           ...this.options.sentinel === undefined ? {} : { sentinel: this.options.sentinel },
         })
         // The account may have changed while the requests were in flight. Drop
@@ -160,6 +170,11 @@ export class WorkBuddyProbeService {
           outcome.validation,
           outcome.efforts,
           account,
+          // Keep the explanation with the observation: an `unknown` record that
+          // does not say why is indistinguishable from a broken request path,
+          // and the only other way to learn the cause is to spend another
+          // round of credit. Only an inconclusive outcome carries a reason.
+          outcome.validation === 'unknown' ? outcome.reason : undefined,
         )
         this.options.store.set(modelId, record)
         if (outcome.validation === 'unknown') {

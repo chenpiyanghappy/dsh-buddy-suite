@@ -1205,6 +1205,7 @@ export class WorkBuddyUpstreamClient {
     model: string,
     effort: string | undefined,
     signal: AbortSignal,
+    maxTokens?: number,
   ): Promise<ProbeAttempt> {
     const international = regionOf(credential.domain) === 'global'
     // Same identity rule as the chat path — chat and its probe sibling must
@@ -1226,7 +1227,10 @@ export class WorkBuddyUpstreamClient {
         ...international ? [{ role: 'system', content: INTERNATIONAL_SYSTEM_PROMPT }] : [],
         { role: 'user', content: PROBE_PROMPT },
       ],
-      max_tokens: international ? INTERNATIONAL_PROBE_MAX_TOKENS : PROBE_MAX_TOKENS,
+      // `maxTokens` is the probe's per-attempt override: the baseline may retry
+      // above a model's floor after a bare parameter rejection. Everything else
+      // keeps the region's own measured ceiling.
+      max_tokens: maxTokens ?? (international ? INTERNATIONAL_PROBE_MAX_TOKENS : PROBE_MAX_TOKENS),
     }
     if (effort !== undefined) payload['reasoning_effort'] = effort
 
@@ -1255,21 +1259,62 @@ export class WorkBuddyUpstreamClient {
 }
 
 /** Pull `extError.code` out of an upstream error body, if it is shaped that way. */
-function errorCodeOf(text: string): { errorCode?: string; detail?: string } {
+function errorCodeOf(text: string): { errorCode?: string; errorMessage?: string; detail?: string } {
   try {
     const parsed: unknown = JSON.parse(text)
     if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
       const wrapped = parsed as Record<string, unknown>
+      // The code alone is often a generic "bad parameter" number (the CN
+      // endpoint answers `1210` for several unrelated causes). Keep the
+      // upstream's own prose beside it, or the only way to learn which
+      // parameter was rejected is to reproduce the request by hand.
+      const message = upstreamErrorMessage(wrapped)
       const extError = wrapped['extError']
       if (typeof extError === 'object' && extError !== null && !Array.isArray(extError)) {
         const code = (extError as Record<string, unknown>)['code']
-        if (typeof code === 'string') return { errorCode: code, detail: code }
+        if (typeof code === 'string') {
+          return {
+            errorCode: code,
+            ...message === undefined ? {} : { errorMessage: message },
+            detail: message === undefined ? code : `${code}: ${message}`,
+          }
+        }
       }
+      if (message !== undefined) return { errorMessage: message, detail: message }
     }
   } catch {
     // Not JSON: fall through to a plain detail line.
   }
   return { detail: text.slice(0, 200) }
+}
+
+/**
+ * The human-readable message in an upstream error body, wherever it sits.
+ *
+ * Measured shapes differ by endpoint: `extError.msg` on the CN error envelope,
+ * `message` / `error.message` on the international one. Field order matters
+ * only for preferring the most specific text, never for a decision.
+ */
+function upstreamErrorMessage(body: Record<string, unknown>): string | undefined {
+  const extError = body['extError']
+  if (typeof extError === 'object' && extError !== null && !Array.isArray(extError)) {
+    for (const key of ['msg', 'message']) {
+      const value = (extError as Record<string, unknown>)[key]
+      if (typeof value === 'string' && value !== '') return value.slice(0, 200)
+    }
+  }
+  for (const key of ['message', 'msg']) {
+    const value = body[key]
+    if (typeof value === 'string' && value !== '') return value.slice(0, 200)
+  }
+  const error = body['error']
+  if (typeof error === 'object' && error !== null && !Array.isArray(error)) {
+    for (const key of ['message', 'msg']) {
+      const value = (error as Record<string, unknown>)[key]
+      if (typeof value === 'string' && value !== '') return value.slice(0, 200)
+    }
+  }
+  return undefined
 }
 
 /**

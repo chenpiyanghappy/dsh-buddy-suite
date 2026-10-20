@@ -99,7 +99,7 @@ export function rankedCandidates(
 
 /** The locale binder this module needs; narrowed to the keys it reads. */
 export type ProbeChipTranslator = (
-  key: 'probeResultNotValidating' | 'probeResultUnknown' | 'probeDeclaredSuffix',
+  key: 'probeResultNotValidating' | 'probeResultUnknown' | 'probeResultUnknownReason' | 'probeDeclaredSuffix',
   params?: Record<string, unknown>,
 ) => string
 
@@ -124,7 +124,14 @@ export function probeChipText(
   if (result.validation === 'validating' && result.efforts.length > 0) {
     return result.efforts.join(' / ')
   }
-  if (result.validation !== 'non-validating') return t('probeResultUnknown')
+  if (result.validation !== 'non-validating') {
+    // An inconclusive detection carries the reason it could not be completed.
+    // Without it the chip is a dead end: the user cannot tell a refused
+    // request from one that never reached the upstream.
+    const reason = result.reason
+    if (reason === undefined || reason === '') return t('probeResultUnknown')
+    return t('probeResultUnknownReason', { reason })
+  }
   const declared = (model?.declaredEfforts?.length ?? 0) > 0
     ? model!.declaredEfforts!.join(' / ')
     : model?.defaultEffort

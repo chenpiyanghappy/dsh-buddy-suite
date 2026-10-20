@@ -325,7 +325,7 @@ function creditBadge(
 function tooltipText(
   t: WorkBuddyPluginCardInjected['t'],
   model: string,
-  state: { busy: boolean; failed: boolean; result?: WorkBuddyWebProbeModel | undefined },
+  state: { busy: boolean; failed: boolean; result?: WorkBuddyWebProbeModel | undefined; failureReason?: string | undefined },
 ): string {
   if (state.busy) return t('probeRunning', { model })
   const result = state.result
@@ -336,7 +336,14 @@ function tooltipText(
     if (result.validation === 'non-validating') return t('probeTooltipNotValidating')
     return t('probeTooltipRetry')
   }
-  if (state.failed) return t('probeTooltipRetry')
+  if (state.failed) {
+    // A failure with a known cause names it; without one the tooltip stays
+    // the bare retry hint.
+    const reason = state.failureReason
+    return reason === undefined || reason === ''
+      ? t('probeTooltipRetry')
+      : t('probeTooltipFailedReason', { reason })
+  }
   return t('probeTooltipIdle', { model })
 }
 
@@ -390,6 +397,15 @@ function ModelProbe({ model, card, label, t }: {
   const [confirming, setConfirming] = useState(false)
   const [tooltipVisible, setTooltipVisible] = useState(false)
   const [failed, setFailed] = useState(false)
+  /**
+   * Why the last detection could not be completed, when the host said so.
+   *
+   * The host answers a failed detection with the failing stage and the
+   * upstream's error code. Dropping that leaves the user with a bare
+   * "retry" that never explains itself, and the only way to learn the cause is
+   * to spend another round of credit.
+   */
+  const [failureReason, setFailureReason] = useState<string>()
   // Only an explicit detection response opens a note. Background reads and
   // remounts never replay stored results; no persisted "seen" marks are needed.
   const [note, setNote] = useState<WorkBuddyWebProbeModel>()
@@ -511,12 +527,16 @@ function ModelProbe({ model, card, label, t }: {
         body: JSON.stringify({ action: 'probe', model }),
       })
       const body = await response.json() as {
-        state?: string; validation?: string; efforts?: unknown
+        state?: string; validation?: string; efforts?: unknown; reason?: unknown
       }
       if (!response.ok || body.state !== 'ok'
         || (body.validation !== 'validating' && body.validation !== 'non-validating')
         || !Array.isArray(body.efforts) || !body.efforts.every(effort => typeof effort === 'string')) {
-        throw new Error('probe failed')
+        // The host explains an inconclusive detection: the failing stage and
+        // the upstream's error code. Keep it, so the user is not left with a
+        // bare "retry" and no way to learn what actually failed.
+        const reason = typeof body.reason === 'string' ? body.reason : undefined
+        throw new Error(reason === undefined ? 'probe failed' : reason)
       }
       // This response belongs to the explicit click, even when the host reused
       // an older cached result. Do not wait for /status (which fetches credit),
@@ -529,8 +549,15 @@ function ModelProbe({ model, card, label, t }: {
         setNote(completed)
       }
       void refresh().catch(() => { /* Credit/status failure does not undo a completed probe. */ })
-    } catch {
-      if (mounted.current) setFailed(true)
+    } catch (error: unknown) {
+      if (mounted.current) {
+        setFailed(true)
+        // The thrown message is the host's explanation when it gave one.
+        const reason = error instanceof Error && error.message !== '' && error.message !== 'probe failed'
+          ? error.message
+          : undefined
+        setFailureReason(reason)
+      }
     } finally {
       inFlight.current = false
       if (mounted.current) setBusy(false)
@@ -558,7 +585,7 @@ function ModelProbe({ model, card, label, t }: {
   // holding space in the composer.
   if (!showCredit && !showLevels) return null
 
-  const text = tooltipText(t, model, { busy, result, failed })
+  const text = tooltipText(t, model, { busy, result, failed, failureReason })
   const disabled = busy || probe?.running === true || key === undefined
   // Both bubbles and the tooltip anchor to the same spot above the control, so
   // only one may be open at a time. The confirmation and the result note both
@@ -679,5 +706,9 @@ function noteText(t: WorkBuddyPluginCardInjected['t'], result: WorkBuddyWebProbe
     return t('probeNoteVerified', { levels: result.efforts.join(' / ') })
   }
   if (result.validation === 'non-validating') return t('probeNoteNotValidating')
-  return t('probeNoteUnknown')
+  // The reason names the failing stage, so the user can act on it instead of
+  // retrying a detection that was never going to succeed.
+  const reason = result.reason
+  if (reason === undefined || reason === '') return t('probeNoteUnknown')
+  return t('probeNoteUnknownReason', { reason })
 }

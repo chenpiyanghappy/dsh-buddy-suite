@@ -58,6 +58,14 @@ export interface WorkBuddyWebProbeModel {
   validation: 'validating' | 'non-validating' | 'unknown'
   efforts: readonly string[]
   probedAt: number
+  /**
+   * Why an `unknown` observation could not be completed.
+   *
+   * Diagnostic only, and absent for a decisive observation. It is what tells
+   * "the upstream refused this request" apart from "the request never
+   * reached the upstream", which the bare `unknown` state cannot.
+   */
+  reason?: string
 }
 
 /** Probe section of the status document. */
