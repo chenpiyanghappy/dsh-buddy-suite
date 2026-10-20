@@ -19,6 +19,10 @@
 
 ## 截图
 
+每日签到 —— 启动时自动完成签到，toast 直接报出「已签到 +100 积分」与剩余积分：
+
+![每日签到：已签到 +100 积分与剩余积分](assets/screenshot-checkin-panel.png)
+
 模型选择器 —— WorkBuddy 国内版模型直接出现在 DSH 的模型列表里，右侧标出每次调用的积分单价：
 
 ![模型选择器：WorkBuddy 模型与积分单价](assets/screenshot-model-picker.png)
