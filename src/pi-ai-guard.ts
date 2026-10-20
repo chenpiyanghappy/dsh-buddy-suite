@@ -23,8 +23,16 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-/** The pi-ai generation this plugin is built and tested against. */
-export const REQUIRED_PI_AI_VERSION = '0.87.1'
+/**
+ * The pi-ai generation this plugin is built and tested against.
+ *
+ * Must track `package.json`'s `@earendil-works/pi-ai` dependency, and
+ * `tests/pi-ai-guard.spec.ts` asserts exactly that. Measured 2026-10-20: this
+ * constant still said `0.87.1` after the dependency (and the upstream plugin)
+ * had moved to `1.3.0`, so every healthy start logged "the wrong copy is being
+ * resolved" — permanent noise on the one line that a real regression needs read.
+ */
+export const REQUIRED_PI_AI_VERSION = '1.3.0'
 
 /**
  * Read the version of the pi-ai copy Node resolves for *this* module.

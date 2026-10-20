@@ -97,6 +97,10 @@
 
 - **签到仅国内版**。国际版 token 调国内签到端点返回 401，这是上游限制。
 
+- **Windows 上「回收 PID」保护失效**。`host-heartbeat.ts` 用 `wmic process ... get CreationDate` 读进程启动时间，但 Windows 11 当前版本**已移除 `wmic`**（本机实测 `wmic` 不存在），于是 `processStartTimeMs()` 恒为 `undefined`，`isHeartbeatProcessAlive()` 退化成「PID 存在即存活」。后果：宿主机崩溃后若该 PID 被无关进程复用，CLI 的 `status` 会把 stale heartbeat 误报成「Host running」。不影响插件运行与模型接入。
+  - 建议改法：Windows 分支改用 `powershell -NoProfile -Command "(Get-Process -Id <pid>).StartTime"`（或 CIM `Win32_Process.CreationDate`），保留 `parseWmiCreationDate` 作为解析器；两者输出都能落到现有的 CIM_DATETIME / 本地时间解析路径。
+  - 现状由 `tests/host-heartbeat.spec.ts` 的「degrade to PID liveness」用例如实记录，不假装强保护仍生效。
+
 ---
 
 ## 三、发布与验证
@@ -143,4 +147,4 @@ pnpm run check
 pnpm run check:offline
 ```
 
-当前状态：typecheck 通过，172 个测试通过，三项自检通过。
+当前状态：typecheck 通过，359 个测试通过（28 个文件），三项自检通过。
