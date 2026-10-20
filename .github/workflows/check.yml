@@ -1,0 +1,62 @@
+name: check
+
+# 三道关：类型检查（两个 tsconfig）、172+ 项测试、构建产物 + 三项自检。
+# 本仓库是「AI 写代码 + 单人维护」，CI 的作用不是给别人看，而是防止
+# 一次看似无害的改动在没人跑过 check 的情况下被推上 main。
+#
+# 两个平台都跑，因为 Electron 定位 / 注册表发现 / WSL 检测这些路径
+# 在 Linux 上只能命中降级分支，Windows 才是真实主路径。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: check (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: ['22']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - name: 安装依赖（锁文件必须命中）
+        run: pnpm install --frozen-lockfile
+
+      - name: typecheck + test + build + verify
+        run: pnpm run check
+
+      # 失败时把测试与构建日志单独留存，省得再让用户手动翻。
+      - name: 失败时上传日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: check-logs-${{ matrix.os }}
+          path: |
+            *.log
+            lib/**
+          retention-days: 7
+          if-no-files-found: ignore

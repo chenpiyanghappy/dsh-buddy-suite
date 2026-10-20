@@ -3,6 +3,8 @@
 这份清单记录 `dsh-buddy-suite` 当前**尚未解决**的问题。按影响面排序：前两类会影响使用者，第三类是发布工作本身。
 
 > 状态说明：✅ 已验证　⚠️ 未验证　❌ 已知缺陷
+>
+> **主动放弃**的功能不在这份清单里，见 `NON-GOALS.md`——那里记的是"想清楚了不做"，不是"还没做"。
 
 ---
 
@@ -97,39 +99,21 @@
 
 ---
 
-## 三、发布前待办
+## 三、发布与验证
 
-以下都是 `npm publish` 之前必须处理的技术问题。
+### 已完成 ✅（本节旧版曾把它们误列为待办）
 
-### manifest 缺字段 ❌
-
-```jsonc
-// 当前 package.json 缺少：
-"repository": { "type": "git", "url": "..." },   // npm 会告警/报错
-"homepage": "https://github.com/...",            // 可选但建议
-"bugs": { "url": "https://github.com/.../issues" },
-```
-
-### `bin` 未声明 ❌
-
-`lib/bin.js` 已构建且能运行，但 `package.json` 里没有 `bin` 字段，安装后不会生成 `dsh-buddy-suite` 命令。
-
-```jsonc
-"bin": { "dsh-buddy-suite": "lib/bin.js" }
-```
-
-### `files` 漏了英文 README ⚠️
-
-```jsonc
-"files": ["lib", "cordis.patch.yml", "README.md", "LICENSE"]
-//         缺少 README.en.md
-```
+| 项 | 现状 |
+|---|---|
+| `repository` 字段 | 已补 `git+https://github.com/chenpiyanghappy/dsh-buddy-suite.git`。`homepage` / `bugs` 建议后续一并补，让 npm 页面有跳转，不阻塞发布 |
+| `bin` 声明 | 已声明 `dsh-buddy-suite -> lib/bin.js` |
+| `files` 漏英文 README | 已含 `README.md`、`README.en.md`、`KNOWN-ISSUES.md`、`LICENSE` |
 
 ### 版本兼容性 ⚠️
 
 peerDependencies 精确锁定 `0.2.1-rc.2`。这是**刻意**的：内核 API 在 rc 之间有变动，锁死可以避免装上后崩溃。但代价是**内核升级就需要同步发版**。
 
-另外，`dsh-buddy-checkin@0.4.0` 曾因 peer 范围不含 `0.2.1-rc.2` 被 DSH 拒绝安装——本插件的 peer 已对齐到 `0.2.1-rc.2`，可以正常安装。
+另外，`dsh-buddy-checkin` 的 `0.4.0` 曾因 peer 范围不含 `0.2.1-rc.2` 被 DSH 拒绝安装——该问题已随其 **v0.4.1（2026-10-19）** 修复，现在两个插件都能装。它仍在正常维护（5 周内 8 个版本），只是功能与本插件重复，仍按二选一使用。
 
 ### 本地安装使用绝对路径 ⚠️
 

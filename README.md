@@ -71,10 +71,18 @@
 pnpm install
 pnpm build     # tsdown 构建产物到 lib/
 pnpm test      # vitest 运行测试
-pnpm check     # 类型检查 + 测试 + 构建
+pnpm check     # 类型检查 + 测试 + 构建 + 三项自检
+pnpm run check:offline   # 受限环境（沙箱禁止 spawn）下的等价命令
 ```
 
 构建产物 `lib/` 与 `cordis.patch.yml` 由宿主（DeepSeek Harness）按 cordis 插件方式加载。
+
+**持续集成**：`.github/workflows/check.yml` 会在 `main` 的每次推送与所有 PR 上，用 Ubuntu 与 Windows 两个平台跑一遍 `pnpm run check`（Node 22 + pnpm 9 + 锁文件安装）。改动合并前必须先绿。
+
+**想参与改动前，请先看两份清单**：
+
+- [`NON-GOALS.md`](./NON-GOALS.md) —— 主动放弃的功能（薅积分自动化、接管登录/刷新、并发探测、逐请求积分明细……）。这些不是"还没做"，是"想清楚了不做"，提 PR 前先看这里。
+- [`KNOWN-ISSUES.md`](./KNOWN-ISSUES.md) —— 未验证项与已知缺陷，对外表述以这份为准。
 
 ## 已发布版本
 
