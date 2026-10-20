@@ -8,14 +8,14 @@
 
 > 把 WorkBuddy 桌面端的模型接入 DeepSeek Harness，并自动完成每日签到。**模型接入同时覆盖国内版（WorkBuddy）与国际版（WorkBuddy AI）两套账号**；签到面向本机全部国内版账号。
 
-`dsh-buddy-suite`（插件节点 id `llm-workbuddy-suite`，provider `workbuddy-suite` / `workbuddy-ai-suite`）是一个 [DeepSeek Harness](https://github.com/DeepSeek-V3/DeepSeek-Harness) 的 cordis 插件，把原本需要两个独立流程才能做完的事合并到一起：
+`dsh-buddy-suite`（插件节点 id `llm-workbuddy-suite`，provider `workbuddy-suite` / `workbuddy-ai-suite`）是一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的 cordis 插件，把原本需要两个独立流程才能做完的事合并到一起：
 
 1. **模型接入**：通过本机 loopback 的 OpenAI 兼容 shim，把 WorkBuddy 桌面客户端里的模型接入 DeepSeek Harness。支持 `cn` / `global` 两个区，覆盖流式对话、工具调用、推理力度档位、积分余额与过期预警。
 2. **每日签到**：在 DeepSeek Harness 启动与会话面板交互时，自动为所有本机 WorkBuddy 国内版账号完成每日签到（CN-only；国际账号会被上游私有端点拒绝）。签到幂等、失败重试、跨午夜惰性滚动。
 
 两半只共用一个**凭证解密模块**（用 App 自带的 Electron 解密本机 at-rest 凭证），彼此独立、任一半失败都不影响另一半。
 
-> **是的，它是一个替代品，不是补充品。** 装本插件即可，**不要再装** `dsh-workbuddy-connect` 或 `dsh-buddy-checkin`——它们分别是本插件的两半，签到这部分正是由本插件接手的。`dsh-buddy-checkin` 的 `0.4.1`（2026-10-19）已支持 DSH 0.2.1-rc.1 / rc.2，装上不会被拒绝安装；但它只管签到，模型接入仍需另装 connect，两边功能重复。
+> **是的，它是一个替代品，不是补充品。** 装本插件即可，**不要再装** [`dsh-workbuddy-connect`](https://github.com/corrinehu/dsh-workbuddy-connect) 或 [`dsh-buddy-checkin`](https://github.com/corrinehu/dsh-buddy-checkin)——它们分别是本插件的两半，签到这部分正是由本插件接手的。`dsh-buddy-checkin` 的 `0.4.1`（2026-10-19）已支持 DSH 0.2.1-rc.1 / rc.2，装上不会被拒绝安装；但它只管签到，模型接入仍需另装 connect，两边功能重复。
 
 ---
 
@@ -144,11 +144,12 @@ npm install dsh-buddy-suite
 
 - **[corrinehu/dsh-workbuddy-connect](https://github.com/corrinehu/dsh-workbuddy-connect)**（MIT，npm `dsh-workbuddy-connect@0.7.8`）
   本项目的「模型接入」半**直接派生自**该已发布插件：同样的 cordis 架构、loopback shim、adapter 与 `cordis.patch.yml` 套路。`dsh-buddy-suite` 是其**超集**——在模型接入之外，额外合入了「每日签到」半。
-  致谢：本项目维护者 `@chenpiyanghappy` 的 **PR #156** 已合入 dsh-workbuddy-connect v0.7.8（适配 DSH 0.2.1-rc.2）；WorkBuddy 另递 PR #159 / #164。
+  致谢：本项目维护者 `@chenpiyanghappy` 的 **[PR #156](https://github.com/corrinehu/dsh-workbuddy-connect/pull/156)** 已合入 dsh-workbuddy-connect v0.7.8（适配 DSH 0.2.1-rc.2）；WorkBuddy 另递 **[PR #159](https://github.com/corrinehu/dsh-workbuddy-connect/pull/159)** / **[PR #164](https://github.com/corrinehu/dsh-workbuddy-connect/pull/164)**。
+  （上游仓库托管在 GitHub，上面的 PR 链接都是 GitHub 绝对地址，在 CNB 镜像页同样可点。）
 
-- **[Sliverkiss/workbuddy2api](https://github.com/Sliverkiss/workbuddy2api)**（MIT，Go 实现）
+- **`Sliverkiss/workbuddy2api`**（MIT，Go 实现）
   上游 wire 协议（聊天 SSE 流式、token 刷新、模型目录、积分余额）的参照实现；本项目 `src/upstream.ts` 的协议行为**移植自**它。
-  ⚠️ 该仓库现已 404（删除或转为私有），仅在 dsh-workbuddy-connect 的 README 与本项目代码注释中留有致谢。
+  ⚠️ 该仓库现已 404（删除或转为私有），故此处不再提供链接；致谢保留在 [dsh-workbuddy-connect](https://github.com/corrinehu/dsh-workbuddy-connect) 的 README 与本项目代码注释中。
 
 - **[franksong2702/dsh-codex-connect](https://github.com/franksong2702/dsh-codex-connect)**（Apache-2.0）
   插件目录结构、provider 注册方式的参照。

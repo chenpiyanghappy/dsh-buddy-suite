@@ -141,7 +141,10 @@ pnpm run check:offline   # same, but runs tests without spawning workers
 
 - [corrinehu/dsh-workbuddy-connect](https://github.com/corrinehu/dsh-workbuddy-connect) (MIT)
 - [corrinehu/dsh-buddy-checkin](https://github.com/corrinehu/dsh-buddy-checkin) (MIT)
-- [Sliverkiss/workbuddy2api](https://github.com/Sliverkiss/workbuddy2api) (MIT)
+- `Sliverkiss/workbuddy2api` (MIT, Go) — the reference implementation for the
+  upstream wire protocol. The repository is gone (404), so no link; the
+  attribution lives on in dsh-workbuddy-connect's README and in this project's
+  code comments.
 
 ## Disclaimer
 
