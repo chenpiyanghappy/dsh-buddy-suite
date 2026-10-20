@@ -17,6 +17,18 @@
 
 ---
 
+## 截图
+
+推理档位探测 —— DeepSeek-V4-Pro 检出 5 档（low / medium / high / xhigh / max）：
+
+![推理档位探测：DeepSeek-V4-Pro 检出 5 档](assets/screenshot-probe-deepseek-v4-pro.png)
+
+不可调档位的模型 —— GLM-5.1 被判定为「不可调档位」，回落到目录声明的默认档位（medium），而不是笼统的「检测未完成」：
+
+![GLM-5.1 判定为不可调档位](assets/screenshot-probe-glm-5.1.png)
+
+---
+
 ## 安装与构建
 
 本插件通过 `cordis.patch.yml` 注入 DeepSeek Harness 的 profile（**不修改默认模型**）。
