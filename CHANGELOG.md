@@ -2,6 +2,24 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。所有条目按发布顺序倒排。
 
+## 未发布
+
+### 更不容易出错
+
+- **修正 pi-ai 版本常量**：`REQUIRED_PI_AI_VERSION` 长期停在 `0.87.1`，而 `package.json` 的 `@earendil-works/pi-ai` 依赖早已是 `1.3.0`，于是**每次正常启动都打印「the wrong copy is being resolved」**，把真正需要被看见的告警淹没在噪音里。现已对齐 `1.3.0`，并由 `tests/pi-ai-guard.spec.ts` 断言该常量与依赖一致——以后升级依赖忘了改常量会直接测试失败。
+- **测试从 172 项扩到 359 项**（17 → 28 个文件，新增 11 个文件约 2245 行），补齐原本**零覆盖**的模块：`adapter`（模型可见性与档位映射）、`auth`（身份选择 / identity-beats-expiry / 区域不匹配 / refresh 单飞）、`catalog-store`、`visibility-store`、`client-identity`（UA 三段组装与版本回退链）、`app-version`、`state-paths`、`host-heartbeat`、`wsl`、`legacy-settings`、`pi-ai-guard`。其中 `state-paths` 把三个状态文件名写成断言——这是与上游 `dsh-workbuddy-connect` 隔离的红线。不含渲染快照，也不含「调用一下不报错」式用例。
+
+### 工程与文档
+
+- **新增 GitHub Actions CI**（`.github/workflows/check.yml`）：`main` 每次推送、所有 PR 与手动触发都会在 **Ubuntu + Windows 双平台**（Node 22、pnpm 9、`--frozen-lockfile`）跑一遍 `pnpm run check`（typecheck + 测试 + 构建 + 三项自检），失败上传日志，重复推送自动取消上一轮。
+- **新增 [`NON-GOALS.md`](./NON-GOALS.md)**：8 条主动放弃的功能及理由——薅积分自动化、接管登录 / refresh、并发探测、为双装做兼容增强、改 provider 后缀、国际版签到、逐请求积分明细、界面花活，每条都附推翻条件。
+- **README 补「运行环境」**：明确 `node: ^22.19.0 || >=24.0.0`、Node 18 / 20 不在支持范围、`EBADENGINE` 警告不要忽略。此前只有一句「CI 用 Node 22」（写给贡献者的），使用者无从判断自己的环境够不够。
+- `KNOWN-ISSUES` 清掉三项已完成的「发布前待办」，并改正 `dsh-buddy-checkin` 的兼容性表述（其 v0.4.1 已适配 `0.2.1-rc.2`，此前"会被拒绝安装"的说法已过时）。
+
+### 已知未验证项（新增）
+
+- **Windows 上「回收 PID」保护实际失效**：`host-heartbeat.ts` 用 `wmic process ... get CreationDate` 读进程启动时间，而 Windows 11 当前版本**已移除 `wmic`**，于是启动时间恒为 `undefined`，存活判断退化为「PID 存在即存活」。宿主机崩溃后若该 PID 被无关进程复用，`status` 可能把 stale heartbeat 误报成「Host running」。**不影响插件运行与模型接入**。建议改法见 `KNOWN-ISSUES.md`。
+
 ## 0.1.2 — 2026-10-20
 
 ### 新功能
