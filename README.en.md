@@ -122,6 +122,23 @@ See [KNOWN-ISSUES.md](./KNOWN-ISSUES.md) for the full list, including:
 
 ## Development
 
+**Runtime**: `engines` requires `node: ^22.19.0 || >=24.0.0` (23.x excluded — it
+is not an LTS line), following the DSH `0.2.1-rc.2` kernel and the `es2024` build
+target. **Node 18 / 20 are out of scope and fail at runtime**; `npm` only prints
+an `EBADENGINE` warning, so do not ignore it.
+
+**Continuous integration**: `.github/workflows/check.yml` runs `pnpm run check`
+on every push to `main` and every pull request, on both Ubuntu and Windows
+(Node 22, pnpm 9, `--frozen-lockfile`). Changes must be green before merging.
+
+**Before changing anything, read both lists**:
+
+- [`NON-GOALS.md`](./NON-GOALS.md) — what this plugin deliberately does not do.
+  These are not "not implemented yet" but "considered and declined"; check it
+  before sending a pull request.
+- [`KNOWN-ISSUES.md`](./KNOWN-ISSUES.md) — unverified items and known defects.
+  This file is the source of truth for any public claim about the plugin.
+
 ```sh
 pnpm install
 pnpm run check           # typecheck + test + build + verify
