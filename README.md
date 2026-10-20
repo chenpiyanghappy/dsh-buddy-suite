@@ -77,6 +77,8 @@ pnpm run check:offline   # 受限环境（沙箱禁止 spawn）下的等价命�
 
 构建产物 `lib/` 与 `cordis.patch.yml` 由宿主（DeepSeek Harness）按 cordis 插件方式加载。
 
+**运行环境**：`package.json` 的 `engines` 已声明 `node: ^22.19.0 || >=24.0.0`（排除奇数版 23.x，跟随 DSH `0.2.1-rc.2` 内核与 `es2024` 编译目标）。**Node 18 / 20 不在支持范围**，装上后会在运行时抛语法或 API 错误；`npm` 安装时给出的 `EBADENGINE` 警告不要忽略。
+
 **持续集成**：`.github/workflows/check.yml` 会在 `main` 的每次推送与所有 PR 上，用 Ubuntu 与 Windows 两个平台跑一遍 `pnpm run check`（Node 22 + pnpm 9 + 锁文件安装）。改动合并前必须先绿。
 
 **想参与改动前，请先看两份清单**：
