@@ -45,7 +45,7 @@ import {
   type WorkBuddyEnvelope,
 } from './desktop-credential-protection.ts'
 import { BUDDY_CHECKIN_FILENAME } from './state-paths.ts'
-import type { BuddyCheckinDocument, BuddyCheckinRow } from './status-paths.ts'
+import type { BuddyCheckinDocument, BuddyCheckinRow, BuddyCheckinStopCode } from './status-paths.ts'
 
 /** One account's check-in outcome. */
 export interface BuddyCheckinResult {
@@ -64,6 +64,51 @@ export interface BuddyCheckinResult {
   balanceError?: string
   /** Why the check-in failed. */
   error?: string
+  /**
+   * Why retrying today cannot help.
+   *
+   * A rate limit clears by itself and an upstream shape change is not something
+   * the plugin may force through, so both are recorded here and `retryFailed`
+   * leaves the row alone. The field is *absent* for ordinary failures (expired
+   * sign-in, credit refusal), which stay retryable.
+   */
+  stopCode?: BuddyCheckinStopCode
+}
+
+/**
+ * The failures that end the day's attempts for one account.
+ *
+ * Distinct from the retryable failures: the panel's "retry failed accounts"
+ * button exists to fix a transient sign-in/credit problem, and hammering an
+ * endpoint that answered 429 (or that changed shape) is exactly what the
+ * upstream's limit is there to stop.
+ */
+class BuddyCheckinStopError extends Error {
+  readonly code: BuddyCheckinStopCode
+
+  constructor(code: BuddyCheckinStopCode, message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'BuddyCheckinStopError'
+    this.code = code
+  }
+}
+
+/**
+ * Classify one check-in HTTP answer as a stop-retrying failure, if it is one.
+ *
+ * Only the two documented classes qualify: a 429 (or a rate-limit message) and
+ * an endpoint/shape change (404/410, or a body the plugin cannot read). A 401
+ * and a credit refusal stay retryable — signing in again fixes the first, and
+ * the second clears without a plugin change.
+ */
+function classifyCheckinStop(status: number, body: Record<string, unknown>): BuddyCheckinStopCode | undefined {
+  if (status === 429) return 'RATE_LIMITED'
+  const message = String(body['msg'] ?? '')
+  if (/rate.?limit|too many requests|限流|请求过于频繁|频繁/iu.test(message)) return 'RATE_LIMITED'
+  // The endpoint the plugin has always called is gone: the upstream moved it
+  // (or renamed it), and retrying the same request cannot find it again.
+  if (status === 404 || status === 410) return 'UPSTREAM_PROTOCOL_CHANGED'
+  return undefined
 }
 
 /** The persisted check-in state for one day. */
@@ -469,9 +514,29 @@ export async function check(credential: BuddyCheckinCredential): Promise<BuddyCh
       headers: headers(credential),
       body: '{}',
     })
-    const body = await response.json() as Record<string, unknown>
+    let body: Record<string, unknown>
+    try {
+      const parsed: unknown = await response.json()
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        throw new BuddyCheckinStopError('UPSTREAM_PROTOCOL_CHANGED', 'the check-in response was not a JSON object')
+      }
+      body = parsed as Record<string, unknown>
+    } catch (error: unknown) {
+      // An unreadable body is a shape change, not a transient failure: retrying
+      // the same request returns the same bytes.
+      if (error instanceof BuddyCheckinStopError) throw error
+      throw new BuddyCheckinStopError('UPSTREAM_PROTOCOL_CHANGED', 'the check-in response was not valid JSON', { cause: error })
+    }
     const already = string(body['msg'])?.includes('已签到') === true
-    if (!response.ok && !already) throw new Error(string(body['msg']) ?? `HTTP ${response.status}`)
+    if (!response.ok && !already) {
+      const message = string(body['msg']) ?? `HTTP ${response.status}`
+      // A rate limit or an endpoint change ends the day's attempts for this
+      // account; the code rides on the persisted row so a later panel open
+      // does not re-request it.
+      const stopCode = classifyCheckinStop(response.status, body)
+      if (stopCode !== undefined) throw new BuddyCheckinStopError(stopCode, message)
+      throw new Error(message)
+    }
     const total = await balance(credential).catch(() => undefined)
     const data = body['data'] as Record<string, unknown> | undefined
     const credit = typeof data?.['credit'] === 'number' ? data['credit'] as number : undefined
@@ -491,6 +556,7 @@ export async function check(credential: BuddyCheckinCredential): Promise<BuddyCh
       state: 'failed',
       at,
       error: error instanceof Error ? error.message : String(error),
+      ...error instanceof BuddyCheckinStopError ? { stopCode: error.code } : {},
     }
   }
 }
@@ -575,6 +641,8 @@ function rowOf(row: BuddyCheckinResult): BuddyCheckinRow {
     ...row.balanceCheckedAt === undefined ? {} : { balanceCheckedAt: epochOf(row.balanceCheckedAt) },
     ...row.balanceError === undefined ? {} : { balanceError: row.balanceError },
     ...row.error === undefined ? {} : { error: row.error },
+    // Carried so the panel can say "not retried" without parsing prose.
+    ...row.stopCode === undefined ? {} : { stopCode: row.stopCode },
   }
 }
 
@@ -612,13 +680,21 @@ export async function run(path: string = statePath(), opts: BuddyCheckinRunOptio
   const day = today()
   const sameDay = previous?.day === day
   const prior = sameDay ? previous!.results : []
-  const completed = new Map(prior.filter(row => row.state !== 'failed').map(row => [row.uid, row]))
+  // Carried over untouched: accounts that already succeeded today, and accounts
+  // whose failure was classified as "stop retrying" (a rate limit or an upstream
+  // shape change). Without the second half a DSH restart would spend another
+  // rate-limited request on a row the panel has already decided to leave alone.
+  const carried = new Map(
+    prior
+      .filter(row => row.state !== 'failed' || row.stopCode !== undefined)
+      .map(row => [row.uid, row]),
+  )
   const { credentials, unreadable } = await discover(authDirsFor(), opts)
   const attempted = await Promise.all(
-    credentials.filter(credential => !completed.has(credential.uid)).map(credential => check(credential)),
+    credentials.filter(credential => !carried.has(credential.uid)).map(credential => check(credential)),
   )
   const blocked = unreadable
-    .filter(entry => !completed.has(entry.uid))
+    .filter(entry => !carried.has(entry.uid))
     .map<BuddyCheckinResult>(entry => ({
       uid: entry.uid,
       state: 'failed',
@@ -627,10 +703,14 @@ export async function run(path: string = statePath(), opts: BuddyCheckinRunOptio
     }))
   const tried = [...attempted, ...blocked]
   const results = credentials
-    .map(credential => completed.get(credential.uid))
+    .map(credential => carried.get(credential.uid))
     .filter((row): row is BuddyCheckinResult => row !== undefined)
     .concat(tried)
   const ok = tried.filter(row => row.state !== 'failed').length
+  // A row that ended in RATE_LIMITED / UPSTREAM_PROTOCOL_CHANGED will not be
+  // retried by the panel, so the startup notice must not tell the user to retry
+  // it. Naming the count is what keeps "retry in the panel" honest.
+  const stopped = tried.filter(row => row.stopCode !== undefined).length
   // The panel-open rollover shows its outcome in the panel itself, so it skips
   // the notice: a notice would toast some later page load out of nowhere.
   //
@@ -641,6 +721,7 @@ export async function run(path: string = statePath(), opts: BuddyCheckinRunOptio
     ? undefined
     : tried.some(row => row.state === 'failed')
       ? `WorkBuddy 签到：${ok}/${tried.length} 个账号成功，失败账号可在面板中重试`
+        + (stopped === 0 ? '' : `；${stopped} 个账号因限流或上游接口变更已停止重试`)
       : `WorkBuddy 已完成今日签到：${ok} 个账号`
   return await save({
     day,
@@ -751,7 +832,10 @@ export async function claimNotice(path: string = statePath()): Promise<BuddyChec
  * Retry the accounts that failed in today's startup attempt.
  *
  * An account that already succeeded today is never re-requested: a credential
- * that became unreadable later must not demote it.
+ * that became unreadable later must not demote it. Nor is one whose failure was
+ * classified as a stop code: a rate limit clears on its own and an upstream
+ * shape change is not something a retry can fix, so those rows are left exactly
+ * as recorded (with their `stopCode`, which is how the panel explains itself).
  */
 export async function retryFailed(path: string = statePath(), opts: BuddyCheckinDiscoveryOptions = {}): Promise<BuddyCheckinSaved> {
   const previous = await load(path)
@@ -760,7 +844,7 @@ export async function retryFailed(path: string = statePath(), opts: BuddyCheckin
   const accountByUid = new Map(credentials.map(account => [account.uid, account]))
   const retried = await Promise.all(
     previous.results
-      .filter(row => row.state === 'failed')
+      .filter(row => row.state === 'failed' && row.stopCode === undefined)
       .flatMap(row => {
         const account = accountByUid.get(row.uid)
         return account === undefined ? [] : [check(account)]

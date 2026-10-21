@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_PROBE_PATH, WORKBUDDY_STATUS_PATH, isWorkBuddySignedOutReasonCode } from '../status-paths.ts'
 import type { WorkBuddyWebCreditExpiry } from '../status-paths.ts'
-import type { WorkBuddySignedOutReasonCode, WorkBuddyWebModelBadge, WorkBuddyWebProbeModel, WorkBuddyWebProbeSection, WorkBuddyWebStatus, WorkBuddyWebUiPreferences, WorkBuddyWebVisibilitySection } from '../status-paths.ts'
+import type { WorkBuddyHealthState, WorkBuddyLastError, WorkBuddySignedOutReasonCode, WorkBuddyWebModelBadge, WorkBuddyWebProbeModel, WorkBuddyWebProbeSection, WorkBuddyWebStatus, WorkBuddyWebUiPreferences, WorkBuddyWebVisibilitySection } from '../status-paths.ts'
 import { isWorkBuddyWebStatus } from './status-document.ts'
 import { rankedCandidates, probeChipText } from './probe-rows.ts'
 import { diagnoseProbeReason } from './probe-diagnosis.ts'
@@ -107,6 +107,15 @@ const POLL_INTERVAL_MS = 60_000
  * visibly alive without turning the status route into a busy loop.
  */
 const BATCH_POLL_INTERVAL_MS = 5_000
+
+/**
+ * The release this project is archived under.
+ *
+ * A literal rather than `BUDDY_SUITE_VERSION`: the notice records *which*
+ * release ended the project, and that stays 0.1.3-final even when a locally
+ * built development bundle reports a different package version.
+ */
+const DEPRECATION_FINAL_VERSION = '0.1.3-final'
 
 /**
  * The reason codes whose failures the Agent assist block covers: the plugin
@@ -281,6 +290,28 @@ const noticeStyle: CSSProperties = { display: 'flex', flexDirection: 'column', g
 const noticeDetailStyle: CSSProperties = { fontSize: 12, lineHeight: '16px', opacity: 0.8 }
 const urgentNoticeStyle: CSSProperties = { background: 'var(--dsw-alias-state-warn-tertiary, #fff4e5)', borderColor: 'var(--dsw-alias-state-warn-primary, #d97706)', color: 'var(--dsw-alias-label-primary)' }
 const warnNoticeStyle: CSSProperties = { background: 'var(--dsw-alias-bg-l2, #f6f7f9)', borderColor: 'var(--dsw-alias-border-l2)', color: 'var(--dsw-alias-label-primary)' }
+/*
+ * End-of-life notice. Deliberately quiet — a bounded, neutral block rather than
+ * an alert — but it sits above everything else on the card because it changes
+ * how every number below it should be read. The copy itself lives in
+ * `locales.ts`; nothing here hardcodes user-facing text.
+ */
+const deprecationStyle: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 6,
+  marginBottom: 16,
+  padding: '12px 14px',
+  borderRadius: 8,
+  border: '1px solid var(--dsw-alias-border-l2)',
+  background: 'var(--dsw-alias-bg-l2, #f6f7f9)',
+  color: 'var(--dsw-alias-label-primary)',
+  fontSize: 13,
+  lineHeight: '19px',
+}
+const deprecationTitleStyle: CSSProperties = { margin: 0, fontSize: 14, lineHeight: '20px', fontWeight: 600 }
+const deprecationBodyStyle: CSSProperties = { margin: 0, color: 'var(--dsw-alias-label-secondary)' }
+const deprecationHistoryStyle: CSSProperties = { margin: 0, color: 'var(--dsw-alias-label-tertiary)', fontSize: 12, lineHeight: '18px' }
 const quotaListStyle: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 18, paddingTop: 2 }
 const quotaGroupStyle: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 10 }
 const quotaTitleStyle: CSSProperties = { margin: 0, fontSize: 14, lineHeight: '20px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }
@@ -442,14 +473,52 @@ function progressFillStyle(percent: number): CSSProperties {
  * before the first response the card knows nothing about the account, so it must
  * not borrow the signed-out grey — that would read as "nothing is wrong, nobody
  * is signed in" when the truth is "not read yet".
+ *
+ * The tri-state health (when the host reports one) owns the colour, because it
+ * says *who must act*: green = nothing to do, amber = upstream/network trouble
+ * that a retry may clear, red = the credential must be renewed. A document that
+ * predates the health field falls back to the old signed-out grey, so an older
+ * host still renders a sensible lamp.
  */
-function dotStyle(status: 'loading' | WorkBuddyWebStatus['status']): CSSProperties {
-  const color = status === 'signed-in'
-    ? 'var(--dsw-alias-state-success-primary, #22a06b)'
-    : status === 'error'
-      ? 'var(--dsw-alias-state-error-primary, #d92d20)'
-      : 'var(--dsw-alias-label-dimmed, #9aa0a6)'
+function dotStyle(
+  status: 'loading' | WorkBuddyWebStatus['status'],
+  health?: WorkBuddyHealthState,
+): CSSProperties {
+  const color = status === 'loading'
+    ? 'var(--dsw-alias-label-dimmed, #9aa0a6)'
+    : health === 'plugin_ok'
+      ? 'var(--dsw-alias-state-success-primary, #22a06b)'
+      : health === 'upstream_changed'
+        ? 'var(--dsw-alias-state-warn-primary, #d97706)'
+        : health === 'credential_invalid'
+          ? 'var(--dsw-alias-state-error-primary, #d92d20)'
+          : status === 'signed-in'
+            ? 'var(--dsw-alias-state-success-primary, #22a06b)'
+            : status === 'error'
+              ? 'var(--dsw-alias-state-error-primary, #d92d20)'
+              : 'var(--dsw-alias-label-dimmed, #9aa0a6)'
   return { width: 9, height: 9, borderRadius: '50%', flex: '0 0 auto', background: color }
+}
+
+/**
+ * Short explanation for one tri-state health, used as the lamp's tooltip.
+ *
+ * The full upstream message is appended when the document carries one: a code
+ * alone ("UPSTREAM_PROTOCOL_CHANGED") names the class, while the message is
+ * what a user can quote in a report.
+ */
+function healthTooltip(
+  t: WorkBuddyPluginCardInjected['t'],
+  health: WorkBuddyHealthState | undefined,
+  lastError: WorkBuddyLastError | undefined,
+): string | undefined {
+  if (health === undefined) return undefined
+  const label = health === 'plugin_ok'
+    ? t('healthPluginOk')
+    : health === 'upstream_changed'
+      ? t('healthUpstreamChanged')
+      : t('healthCredentialInvalid')
+  return lastError === undefined ? label : `${label} · ${lastError.code} (${lastError.stage}): ${lastError.message}`
 }
 
 function formatNumber(value: number): string {
@@ -514,6 +583,31 @@ function ExpiryNotice({ expiry, t }: {
         ? null
         : <span style={noticeDetailStyle}>{t('expiryExpiresAt', { time: formatTime(soonest) })}</span>}
     </div>
+  )
+}
+
+/**
+ * The end-of-life announcement.
+ *
+ * Placed at the top of the card body, above the account and credit figures, so
+ * the reader cannot take those numbers as a statement that the plugin still
+ * works. The wording is deliberately final: the project is not recommended for
+ * continued use, does not claim to work, and the merged-issue list is labelled
+ * as history rather than as a capability promise. All copy comes from the
+ * locale table.
+ */
+function DeprecationNotice({ t }: {
+  t: WorkBuddyPluginCardInjected['t']
+}): React.ReactNode {
+  return (
+    <section style={deprecationStyle} aria-label={t('deprecationHeading')}>
+      <p style={deprecationTitleStyle}>{t('deprecationHeading')}</p>
+      <p style={deprecationBodyStyle}>{t('deprecationFinalVersion', { version: DEPRECATION_FINAL_VERSION })}</p>
+      <p style={deprecationBodyStyle}>{t('deprecationReality')}</p>
+      <p style={deprecationBodyStyle}>{t('deprecationNoPromise')}</p>
+      <p style={deprecationHistoryStyle}>{t('deprecationHistory')}</p>
+      <p style={deprecationBodyStyle}>{t('deprecationThanks')}</p>
+    </section>
   )
 }
 
@@ -1486,11 +1580,18 @@ export function WorkBuddyPluginCard({ t, variant = CN_CARD_VARIANT }: WorkBuddyP
       </button>
       {open
         ? <div style={cardBodyStyle}>
+            {/* Above the account figures: the end-of-life notice changes how
+                everything below it should be read. */}
+            <DeprecationNotice t={t} />
             <h3 style={quotaTitleStyle}>{t('accountHeading')}</h3>
             <div style={rowStyle}>
               {/* `aria-busy` while nothing has been read: the value is pending, not absent. */}
               <div style={statusStyle} role="status" aria-busy={status === undefined}>
-                <span aria-hidden="true" style={dotStyle(status === undefined ? 'loading' : status.status)} />
+                <span
+                  aria-hidden="true"
+                  title={healthTooltip(t, status?.health, status?.lastError)}
+                  style={dotStyle(status === undefined ? 'loading' : status.status, status?.health)}
+                />
                 <span>{label}</span>
               </div>
               {/* The assist block carries the re-check in this state, so the

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -28,6 +29,32 @@ import {
 
 const ORIGINAL_DSH_HOME = process.env['DSH_HOME']
 let home: string | undefined
+
+/**
+ * Whether the native process-introspection command behind `processStartTimeMs`
+ * can be spawned here: PowerShell `Get-Process` on Windows, `ps` elsewhere.
+ *
+ * The restricted DSH development sandbox denies subprocess spawning with
+ * `EPERM`, in which case `processStartTimeMs` is documented to return
+ * `undefined` and fall back to plain PID liveness. Tests that demand a real
+ * timestamp must therefore skip when the command cannot run, rather than fail on
+ * an environment limitation. When spawning *is* available, the caller is
+ * entitled to a real value — that is the regression guard against silently
+ * dropping back to `undefined` (which is exactly what the removed `wmic` call
+ * did on Windows 11).
+ */
+function canSpawnProcessInfoCommand(): boolean {
+  try {
+    if (process.platform === 'win32') {
+      execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'exit 0'], { windowsHide: true })
+    } else {
+      execFileSync('ps', ['-o', 'pid=', '-p', String(process.pid)], { encoding: 'utf8' })
+    }
+    return true
+  } catch {
+    return false
+  }
+}
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'buddy-suite-heartbeat-'))
@@ -187,9 +214,11 @@ describe('isHeartbeatProcessAlive', () => {
     // is to degrade to plain PID liveness — which is what the assertion below
     // encodes rather than pretending the stronger check always runs.
     //
-    // Measured 2026-10-20 on Windows 11: `wmic` is absent from current builds, so
-    // this branch is the one that actually runs there and the recycled-PID
-    // protection is inert. See KNOWN-ISSUES.md.
+    // Windows 11 removed `wmic`, so this used to degrade to plain PID liveness
+    // there and the recycled-PID protection was inert. It now reads the start
+    // time through PowerShell `Get-Process`, so a platform that can spawn the
+    // probe takes the stronger branch; sandboxes that block spawn still take the
+    // documented fallback. See KNOWN-ISSUES.md.
     const alive = isHeartbeatProcessAlive(heartbeat(process.pid, 0))
     if (processStartTimeMs(process.pid) === undefined) {
       expect(alive).toBe(true)
@@ -211,5 +240,18 @@ describe('processStartTimeMs', () => {
       expect(start).toBeGreaterThan(Date.UTC(2020, 0, 1))
       expect(start).toBeLessThanOrEqual(Date.now() + 60_000)
     }
+  })
+
+  it('returns a real timestamp whenever the platform command can be spawned', () => {
+    // Regression guard for the removed `wmic` call: on Windows 11 the old code
+    // could not read a start time at all, so the recycled-PID protection
+    // silently degraded to plain PID liveness. With PowerShell `Get-Process` in
+    // place, a successful spawn must yield a real value rather than `undefined`.
+    // The restricted sandbox (no spawn) is the documented exception and skips.
+    if (!canSpawnProcessInfoCommand()) return
+    const start = processStartTimeMs(process.pid)
+    expect(start).toBeDefined()
+    expect(start!).toBeGreaterThan(Date.UTC(2020, 0, 1))
+    expect(start!).toBeLessThanOrEqual(Date.now() + 60_000)
   })
 })

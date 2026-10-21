@@ -9,7 +9,7 @@
 import { realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { WorkBuddyCredentialStore, workbuddyOwnAuthPath } from './auth.ts'
-import { WorkBuddyUpstreamClient } from './upstream.ts'
+import { classifyWorkBuddyFailure, healthStateOf, WorkBuddyUpstreamClient } from './upstream.ts'
 import { FALLBACK_WORKBUDDY_AI_MODELS, FALLBACK_WORKBUDDY_MODELS } from './catalog.ts'
 import { WORKBUDDY_CONNECT_VERSION } from './version.ts'
 import { isHeartbeatProcessAlive, readHostHeartbeat, workbuddyHostHeartbeatPath } from './host-heartbeat.ts'
@@ -17,6 +17,7 @@ import { atRestKeyProviderFor } from './desktop-credential-protection.ts'
 import { CN_VARIANT, variantFor, WORKBUDDY_VARIANTS, type WorkBuddyVariant } from './variants.ts'
 import { resolveAppVersion } from './app-version.ts'
 import { documentOf, load, run as runToday, status } from './checkin.ts'
+import type { WorkBuddyHealthState, WorkBuddyLastError } from './status-paths.ts'
 
 type Action = 'doctor' | 'logout' | 'status' | 'checkin'
 
@@ -28,6 +29,61 @@ function safeMessage(error: unknown): string {
   return message
     .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/gu, '[redacted token]')
     .replace(/(\b(?:code|token|refresh_token|access_token)=)[^&\s]+/giu, '$1[redacted]')
+}
+
+/**
+ * Object keys that must never appear in a diagnostics document.
+ *
+ * The diagnostic JSON is meant to be pasted into an issue, so the stripping is
+ * by key *and* by suffix: `probeKey` (the in-process control secret),
+ * `accessToken`/`refreshToken` (session material), `atRestSecretKey` (the
+ * decryption key) and anything else ending in token/key/secret. A new field
+ * added under one of those names is stripped without anyone remembering to
+ * update an allow-list — the failure mode is a field missing from the report,
+ * never a secret in it.
+ */
+const SECRET_KEY_EXACT: ReadonlySet<string> = new Set([
+  'probeKey',
+  'token',
+  'secret',
+  'password',
+  'credential',
+  'authorization',
+])
+
+/** Whether a diagnostics key names secret material. */
+function isSecretKey(key: string): boolean {
+  // Any `*Key` suffix is stripped too: `probeKey`, `apiKey`, `accessKey`, and
+  // `atRestSecretKey` all end in "Key", and a diagnostics document has no
+  // legitimate field that does.
+  return SECRET_KEY_EXACT.has(key) || /(?:token|secret|password|key)$/iu.test(key)
+}
+
+/** Redact token-shaped content from one string value. */
+function scrubString(value: string): string {
+  return value
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/gu, '[redacted token]')
+    .replace(/(\b(?:code|token|refresh_token|access_token)=)[^&\s]+/giu, '$1[redacted]')
+}
+
+/**
+ * Strip every secret from a diagnostics document, recursively.
+ *
+ * Exported so the guarantee can be asserted directly: a test hands this
+ * function a document that *does* carry `probeKey` and token fields and checks
+ * the result, rather than trusting that today's report builder happens to omit
+ * them.
+ */
+export function stripDiagnosticSecrets(value: unknown): unknown {
+  if (typeof value === 'string') return scrubString(value)
+  if (Array.isArray(value)) return value.map(entry => stripDiagnosticSecrets(entry))
+  if (typeof value !== 'object' || value === null) return value
+  const stripped: Record<string, unknown> = {}
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (isSecretKey(key)) continue
+    stripped[key] = stripDiagnosticSecrets(entry)
+  }
+  return stripped
 }
 
 function printHelp(): void {
@@ -46,8 +102,15 @@ function printHelp(): void {
   ].join('\n'))
 }
 
+/**
+ * Emit one JSON document.
+ *
+ * Every JSON path runs through {@link stripDiagnosticSecrets}: the report is
+ * designed to be shared, so the removal is a property of printing rather than
+ * of each builder remembering it.
+ */
 function printJson(value: unknown): void {
-  process.stdout.write(`${JSON.stringify(value)}\n`)
+  process.stdout.write(`${JSON.stringify(stripDiagnosticSecrets(value))}\n`)
 }
 
 /**
@@ -95,6 +158,16 @@ async function doctor(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
   const decryptionNote = authStatus.state === 'signed-out' && desktopFormat === 'encrypted' && authStatus.reason !== undefined
     ? `Encrypted desktop credential could not be used: ${authStatus.reason}`
     : undefined
+  // Boot-free tri-state health. Two facts are provable offline: a signed-in
+  // credential is `plugin_ok`, and a desktop file in a format this plugin
+  // understands neither as plaintext nor as its known encrypted shape is
+  // `upstream_changed` — the app changed its own storage format, which no
+  // credential fix can undo. `doctor` deliberately sends no request, so it can
+  // never report a transport-level `upstream_changed`; `status` performs the
+  // live read that can.
+  const health: WorkBuddyHealthState = desktopFormat === 'unrecognized'
+    ? 'upstream_changed'
+    : authStatus.state === 'signed-in' ? 'plugin_ok' : 'credential_invalid'
   const report = {
     schemaVersion: JSON_SCHEMA_VERSION,
     package: 'dsh-buddy-suite',
@@ -102,6 +175,7 @@ async function doctor(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
     node: process.version,
     provider: variant.id,
     displayName: variant.displayName,
+    health,
     desktopAuthFile: {
       path: desktopPath ?? `(no platform default; set ${variant.env})`,
       present: desktopPresent,
@@ -129,6 +203,9 @@ async function doctor(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
       ...decryptionNote !== undefined ? [decryptionNote]
         : authStatus.state === 'signed-out' ? [`Sign in once in the ${variant.appName} desktop app, then run status again.`] : [],
       ...desktopPresent ? [] : [`No ${variant.appName} desktop auth file at the expected path; set ${variant.env} if it lives elsewhere.`],
+      ...desktopFormat === 'unrecognized'
+        ? [`The ${variant.appName} desktop auth file is in a format this plugin does not recognize; it changed shape upstream. Use the official ${variant.appName} client.`]
+        : [],
       ...hostAlive ? [] : ['Host bundle not running in this DSH profile (or the process exited). The browser card and provider are unavailable until DSH starts the plugin.'],
     ],
   }
@@ -137,6 +214,7 @@ async function doctor(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
   } else {
     process.stdout.write([
       `${variant.displayName} Suite ${WORKBUDDY_CONNECT_VERSION} on ${process.version}`,
+      `Health: ${health}`,
       `Desktop auth file: ${report.desktopAuthFile.present ? 'present' : 'missing'} — ${desktopFormat} (${report.desktopAuthFile.path})`,
       `Host bundle: ${hostAlive ? `running (pid ${heartbeat!.pid})` : heartbeat !== undefined ? 'stale heartbeat (process exited)' : 'not started'}`,
       `Sign-in state: ${report.signIn}`,
@@ -157,13 +235,37 @@ async function statusCommand(jsonOutput: boolean, variant: WorkBuddyVariant): Pr
   const hostAlive = heartbeat !== undefined && isHeartbeatProcessAlive(heartbeat)
   const hostState = hostAlive ? 'running' : heartbeat !== undefined ? 'stale' : 'not-started'
   if (authStatus.state !== 'signed-in') {
+    // Health is `credential_invalid` by definition: no usable credential means
+    // no plugin action can help until the user signs in (or fixes the file).
+    const health: WorkBuddyHealthState = 'credential_invalid'
+    const lastError: WorkBuddyLastError = {
+      stage: 'credential',
+      code: authStatus.reasonCode === 'encrypted-credential-unreadable'
+        ? 'CREDENTIAL_DECRYPT_FAILED'
+        : 'CREDENTIAL_MISSING',
+      message: authStatus.reason ?? (authStatus.reasonCode ?? 'no usable credential'),
+    }
     if (jsonOutput) {
-      printJson({ schemaVersion: JSON_SCHEMA_VERSION, package: 'dsh-buddy-suite', version: WORKBUDDY_CONNECT_VERSION, provider: variant.id, status: 'signed-out', hostBundle: hostState })
+      printJson({
+        schemaVersion: JSON_SCHEMA_VERSION,
+        package: 'dsh-buddy-suite',
+        version: WORKBUDDY_CONNECT_VERSION,
+        provider: variant.id,
+        status: 'signed-out',
+        hostBundle: hostState,
+        health,
+        lastError,
+      })
     } else {
-      process.stdout.write(`${variant.displayName} Suite: signed out\nHost bundle: ${hostState}\n`)
+      process.stdout.write(`${variant.displayName} Suite: signed out\nHealth: ${health} (${lastError.code}: ${lastError.message})\nHost bundle: ${hostState}\n`)
     }
     return 1
   }
+  // Health starts at full and is lowered by the live credit read below: a
+  // signed-in account whose upstream no longer answers is `upstream_changed`,
+  // which is exactly the case a "signed in" line alone would misreport.
+  let health: WorkBuddyHealthState = 'plugin_ok'
+  let lastError: WorkBuddyLastError | undefined
   let credits: { total: number; unlimited?: true; error?: string } | undefined
   try {
     const credential = await store.current()
@@ -175,6 +277,8 @@ async function statusCommand(jsonOutput: boolean, variant: WorkBuddyVariant): Pr
       }
     }
   } catch (error: unknown) {
+    lastError = classifyWorkBuddyFailure('credits', error)
+    health = healthStateOf(lastError.code)
     credits = { total: 0, error: safeMessage(error) }
   }
   const expiresAt = authStatus.expiresAtMs !== undefined ? new Date(authStatus.expiresAtMs).toISOString() : undefined
@@ -193,11 +297,14 @@ async function statusCommand(jsonOutput: boolean, variant: WorkBuddyVariant): Pr
       ...credits?.unlimited === true ? { creditsUnlimited: true } : {},
       ...credits?.error === undefined ? {} : { creditsError: credits.error },
       hostBundle: hostState,
+      health,
+      ...lastError === undefined ? {} : { lastError },
     })
     return 0
   }
   process.stdout.write([
     `${variant.displayName} Suite: signed in${authStatus.nickname === undefined ? '' : ` as ${authStatus.nickname}`}`,
+    `Health: ${health}${lastError === undefined ? '' : ` (${lastError.code} during ${lastError.stage}: ${lastError.message})`}`,
     ...expiresAt === undefined ? [] : [`Access token expires ${expiresAt} (refresh is automatic)`],
     credits?.error !== undefined
       ? `Remaining credit: unavailable (${credits.error})`

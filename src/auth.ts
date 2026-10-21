@@ -23,8 +23,8 @@ import {
   openAuthField,
   reasonCodeOf,
   unwrapDesktopAuthDocument,
-} from './desktop-credential-protection.ts'
-import type { DesktopAuthClassification, DesktopAuthFormat } from './desktop-credential-protection.ts'
+} from './credential/index.ts'
+import type { DesktopAuthClassification, DesktopAuthFormat } from './credential/index.ts'
 import type { WorkBuddySignedOutReasonCode } from './status-paths.ts'
 import { CN_VARIANT, electronProfileFor, type WorkBuddyVariant } from './variants.ts'
 import type { WorkBuddyRefreshOutcome } from './upstream.ts'

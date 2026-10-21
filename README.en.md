@@ -1,5 +1,36 @@
 # DSH Buddy Suite
 
+> **This project is no longer maintained and has been archived; `0.1.3-final` is the final version.**
+>
+> **End of life**: real-device testing showed that accessing WorkBuddy models through
+> an unofficial client is **no longer viable** under the restrictions WorkBuddy
+> introduced on **2026-10-20**. The project has therefore reached the end of its
+> life and closes as the archived version `0.1.3-final`. **This plugin does not claim
+> to be usable, and continued use of this approach is not recommended**; if you need
+> WorkBuddy model access, use the official WorkBuddy client.
+>
+> **Background and boundary**: since **2026-10-20**, WorkBuddy restricts requests from
+> non-official clients. The upstream dependency
+> [dsh-workbuddy-connect](https://github.com/corrinehu/dsh-workbuddy-connect) has
+> stopped maintenance and is planned to go offline on **2026-10-22** (refer to its
+> announcement). This project respects that boundary and will no longer adapt to
+> WorkBuddy's private protocol; new feature requests and PRs are closed, and no
+> updates, compatibility fixes, or support will be provided.
+>
+> **Historical record (not a capability promise)**: before upstream stopped, this
+> project had already picked up several capabilities and fixes recorded in upstream
+> issues — error diagnostics (#199), context / reasoning-level control (#186 / #96),
+> visibility toggles (#181 / #168), credits display (#183), tests 172 → 360 (#165),
+> four-channel distribution (#180 / #176 / #175 / #160 / #158), credential
+> robustness and the Windows "recycled PID" guard, plus this release's T1 graceful
+> degradation / T2 health routing / T4 credential isolation. This is recorded for
+> context only and does not imply the approach still works.
+>
+> **Thanks**: to everyone who used the project. The code and docs are kept as-is for
+> reference and personal study; continued operation on any WorkBuddy / DeepSeek
+> Harness version is not guaranteed, and continued use is not recommended. See
+> [COMPATIBILITY.md](./COMPATIBILITY.md) for the support matrix of the final version.
+
 English | [中文](./README.md)
 
 **One plugin that does both WorkBuddy jobs**: it brings WorkBuddy desktop app
@@ -15,8 +46,8 @@ It is built on two same-lineage projects,
 [dsh-buddy-checkin](https://github.com/corrinehu/dsh-buddy-checkin)
 (daily check-in), and merges them into one bundle.
 
-> **Status: 0.1.2, released.** See [KNOWN-ISSUES.md](./KNOWN-ISSUES.md) for
-> what is verified, what is not, and remaining known issues. In
+> **Final status: 0.1.3-final, archived.** See [KNOWN-ISSUES.md](./KNOWN-ISSUES.md)
+> for what is verified, what is not, and remaining known issues. In
 > short: the check-in and model halves both work on Windows against a real
 > account; Linux, macOS, and the international app are untested.
 
@@ -77,6 +108,9 @@ machine. The plugin reuses that sign-in and starts no OAuth flow.
 dsh plugin --profile web add dsh-buddy-suite
 ```
 
+**The final version is `0.1.3-final`; installation stops there** — the project is
+archived and no later versions will be published.
+
 ## Coexisting with dsh-workbuddy-connect
 
 Both bundles register WorkBuddy models, so the two can be installed side by
@@ -131,13 +165,16 @@ an `EBADENGINE` warning, so do not ignore it.
 on every push to `main` and every pull request, on both Ubuntu and Windows
 (Node 22, pnpm 9, `--frozen-lockfile`). Changes must be green before merging.
 
-**Before changing anything, read both lists**:
+**Before changing anything, read both lists** (the project is archived, so no
+pull requests are expected; the lists remain as historical records):
 
 - [`NON-GOALS.md`](./NON-GOALS.md) — what this plugin deliberately does not do.
   These are not "not implemented yet" but "considered and declined"; check it
   before sending a pull request.
 - [`KNOWN-ISSUES.md`](./KNOWN-ISSUES.md) — unverified items and known defects.
   This file is the source of truth for any public claim about the plugin.
+- [`COMPATIBILITY.md`](./COMPATIBILITY.md) — DSH / Node / WorkBuddy support
+  matrix for the final version `0.1.3-final`.
 
 ```sh
 pnpm install

@@ -11,11 +11,11 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { WorkBuddyCredentialStore } from './auth.ts'
 import type { WorkBuddyUpstreamClient } from './upstream.ts'
-import { normalizeCredits } from './upstream.ts'
+import { classifyWorkBuddyFailure, healthStateOf, normalizeCredits } from './upstream.ts'
 import type { WorkBuddyModelInfo } from './catalog.ts'
 import { hostIsLoopback, originIsLoopback } from './loopback.ts'
 import { WORKBUDDY_STATUS_PATH } from './status-paths.ts'
-import type { WorkBuddyWebCatalog, WorkBuddyWebModelBadge, WorkBuddyWebProbeSection, WorkBuddyWebStatus, WorkBuddyWebUiPreferences, WorkBuddyWebVisibilitySection } from './status-paths.ts'
+import type { WorkBuddyHealthState, WorkBuddyLastError, WorkBuddyWebCatalog, WorkBuddyWebModelBadge, WorkBuddyWebProbeSection, WorkBuddyWebStatus, WorkBuddyWebUiPreferences, WorkBuddyWebVisibilitySection } from './status-paths.ts'
 
 export { WORKBUDDY_STATUS_PATH } from './status-paths.ts'
 export type { WorkBuddyWebStatus } from './status-paths.ts'
@@ -112,11 +112,35 @@ export async function workBuddyWebStatus(
     // produced by the store and is expected to be a short, path-only
     // diagnosis, so any new failure path added here must keep credentials,
     // payloads and subprocess output out of its own message.
+    //
+    // Health is `credential_invalid` here by definition: with no usable
+    // credential there is nothing the plugin can do until the user signs in.
+    // The classified error rides along so the card's lamp tooltip names the
+    // cause (an unreadable at-rest field is a *different* fix from a sign-in).
+    const credentialFailure: WorkBuddyLastError = {
+      stage: 'credential',
+      code: authStatus.reasonCode === 'encrypted-credential-unreadable'
+        ? 'CREDENTIAL_DECRYPT_FAILED'
+        : 'CREDENTIAL_MISSING',
+      message: authStatus.reason ?? (authStatus.reasonCode ?? 'no usable credential'),
+    }
     return {
       status: 'signed-out',
       ...authStatus.reason === undefined ? {} : { reason: authStatus.reason },
       ...authStatus.reasonCode === undefined ? {} : { reasonCode: authStatus.reasonCode },
+      health: 'credential_invalid',
+      lastError: credentialFailure,
     }
+  }
+  // Start healthy and let every live read below lower the state. A document
+  // that was assembled while the credit read failed must not claim full health
+  // merely because sign-in succeeded.
+  let health: WorkBuddyHealthState = 'plugin_ok'
+  let lastError: WorkBuddyLastError | undefined
+  /** Fold one observed failure into the document's tri-state health. */
+  const degrade = (stage: 'catalog' | 'credits', error: unknown): void => {
+    lastError = classifyWorkBuddyFailure(stage, error)
+    health = healthStateOf(lastError.code)
   }
   const status: WorkBuddyWebStatus = {
     status: 'signed-in',
@@ -186,6 +210,11 @@ export async function workBuddyWebStatus(
   // "no models" is precisely the case a user needs explained, and it is the
   // only way to tell a hidden group from a failed fetch.
   const catalog = deps.catalog?.()
+  // A stale catalog is a real degradation even when the credit read succeeds:
+  // the list the picker serves is a snapshot the upstream no longer confirms.
+  // It is folded into health before credits can overwrite it with a fresher
+  // failure (a credits failure carries the more urgent code).
+  if (catalog?.error !== undefined) degrade('catalog', catalog.error)
   const withCatalog: WorkBuddyWebStatus = catalog === undefined ? status : { ...status, catalog }
   // Visibility rides the document beside the model list it qualifies. Absent
   // when no account-with-uid is in effect; the card keys its controls on the
@@ -224,12 +253,31 @@ export async function workBuddyWebStatus(
       // `unlimited` and `cycleResetTime` ride along as-is: the card must see
       // "no cap" as its own state, and the fetch only sets them when the
       // upstream actually reported them.
-      return { ...probed, credits }
+      return {
+        ...probed,
+        credits,
+        health,
+        ...lastError === undefined ? {} : { lastError },
+      }
     }
   } catch (error: unknown) {
-    return { ...probed, creditsError: safeMessage(error) }
+    // A failed credit read does not fail the document: the account, models and
+    // probe state are still worth rendering, and the card reports the failure
+    // beside them. It does lower health, which is what turns the lamp amber/red
+    // without taking the panel down.
+    degrade('credits', error)
+    return {
+      ...probed,
+      creditsError: safeMessage(error),
+      health,
+      ...lastError === undefined ? {} : { lastError },
+    }
   }
-  return probed
+  return {
+    ...probed,
+    health,
+    ...lastError === undefined ? {} : { lastError },
+  }
 }
 
 /** The status route's request handler, extracted so tests can mount it on a bare server. */

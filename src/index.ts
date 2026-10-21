@@ -39,7 +39,7 @@ import { createWorkBuddyAdapter } from './adapter.ts'
 import { createWorkBuddyShim } from './shim.ts'
 import { WorkBuddyProbeService } from './probe-service.ts'
 import { newestFirst, WorkBuddyProbeStore, workbuddyProbePath } from './probe-store.ts'
-import { WorkBuddyUpstreamClient } from './upstream.ts'
+import { safeCall, WorkBuddyUpstreamClient } from './upstream.ts'
 import { piAiVersionWarning } from './pi-ai-guard.ts'
 import { registerWorkBuddyStatusRoute } from './web-status.ts'
 import { registerWorkBuddyUpdateRoute } from './update-route.ts'
@@ -130,6 +130,9 @@ export {
 } from './auth.ts'
 export {
   classifyUpstreamError,
+  classifyWorkBuddyFailure,
+  clientHealthOf,
+  healthStateOf,
   modelWithCurrentPromotion,
   normalizeCredits,
   parseModelCatalog,
@@ -137,16 +140,22 @@ export {
   prepareCnChatBody,
   prepareInternationalChatBody,
   regionOf,
+  safeCall,
+  safeUpstreamMessage,
+  WorkBuddyDegradedError,
+  WorkBuddyHealthTracker,
   WorkBuddyUpstreamClient,
   type UpstreamErrorKind,
   type WorkBuddyCatalogFetch,
   type WorkBuddyChatResult,
+  type WorkBuddyClientHealth,
   type WorkBuddyCredits,
   type WorkBuddyEffort,
   type WorkBuddyModelBilling,
   type WorkBuddyModelReasoning,
   type WorkBuddyPromotion,
   type WorkBuddyRefreshOutcome,
+  type WorkBuddySafeCall,
   type WorkBuddyUpstreamModel,
 } from './upstream.ts'
 export {
@@ -196,6 +205,11 @@ export {
 export type {
   BuddyCheckinDocument,
   BuddyCheckinRow,
+  BuddyCheckinStopCode,
+  WorkBuddyCallStage,
+  WorkBuddyDegradationCode,
+  WorkBuddyHealthState,
+  WorkBuddyLastError,
   WorkBuddyWebStatus,
 } from './status-paths.ts'
 export { BUDDY_SUITE_VERSION, WORKBUDDY_CONNECT_VERSION } from './version.ts'
@@ -524,7 +538,13 @@ async function startVariant(ctx: Context, runtime: VariantRuntime): Promise<bool
     return false
   }
 
-  try {
+  // Provider registration is the one startup step that used to be an
+  // unguarded throw: a missing `llm` seam, a pi-ai generation mismatch, or a
+  // malformed cordis context would take the whole variant down with an
+  // exception. `safeCall` folds whatever happens into one classified failure,
+  // so startup logs one line and the status card can report *why* the variant
+  // never appeared instead of showing a blank group.
+  const registered = await safeCall('registration', async () => {
     const workbuddy = createWorkBuddyAdapter({
       providerId: variant.id,
       displayName: variant.displayName,
@@ -546,6 +566,10 @@ async function startVariant(ctx: Context, runtime: VariantRuntime): Promise<bool
         const account = runtime.account()
         return account === undefined ? [] : runtime.visibilityStore.disabled(account)
       },
+      // The picker marks the models when the upstream stops answering; the
+      // full diagnosis travels on the status card.
+      health: () => runtime.client.health,
+      lastError: () => runtime.client.lastError,
     })
     runtime.invalidate = () => {
       workbuddy.invalidate()
@@ -574,11 +598,16 @@ async function startVariant(ctx: Context, runtime: VariantRuntime): Promise<bool
     }
     runtime.registered = true
     return true
-  } catch (error: unknown) {
-    ctx.logger.error(`dsh-buddy-suite: ${variant.displayName} provider registration failed`, error)
-    void shim.close()
-    return false
-  }
+  })
+
+  if (registered.ok) return registered.value
+  // The failure is recorded on the variant's own client, which is what the
+  // status route reads: the card then reports the registration stage instead
+  // of a generic "not signed in".
+  runtime.client.noteFailure('registration', registered.error)
+  ctx.logger.error(`dsh-buddy-suite: ${variant.displayName} provider registration failed`, registered.error)
+  void shim.close()
+  return false
 }
 
 /**

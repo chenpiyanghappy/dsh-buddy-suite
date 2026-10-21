@@ -13,6 +13,7 @@ import { chatUserAgent, fallbackChatIdentity, resolveChatIdentity, type ChatIden
 import type { WorkBuddyCredential } from './auth.ts'
 import type { ProbeAttempt } from './probe.ts'
 import { PROBE_MAX_TOKENS, PROBE_PROMPT } from './probe.ts'
+import type { WorkBuddyCallStage, WorkBuddyDegradationCode, WorkBuddyHealthState, WorkBuddyLastError } from './status-paths.ts'
 
 /** WorkBuddy region selected by the credential's login domain. */
 export type WorkBuddyRegion = 'cn' | 'global'
@@ -375,6 +376,201 @@ export function classifyUpstreamError(status: number, body: string): UpstreamErr
 }
 
 /**
+ * Client-facing degradation state, as the model picker and the status card read
+ * it.
+ *
+ * `degraded` still serves (the plugin answers with what it has), `down` means
+ * nothing usable is left: the difference decides whether the card reports
+ * "retry later" or "sign in again / upstream is incompatible".
+ */
+export type WorkBuddyClientHealth = 'ok' | 'degraded' | 'down'
+
+/**
+ * A failure that has already been folded into the closed degradation vocabulary.
+ *
+ * Thrown instead of the original error so callers that only forward failures
+ * still hand the status card a code it can display, and so {@link classifyWorkBuddyFailure}
+ * never re-derives a class from prose it already knows.
+ */
+export class WorkBuddyDegradedError extends Error {
+  readonly code: WorkBuddyDegradationCode
+  readonly stage: WorkBuddyCallStage
+
+  constructor(stage: WorkBuddyCallStage, code: WorkBuddyDegradationCode, message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'WorkBuddyDegradedError'
+    this.stage = stage
+    this.code = code
+  }
+}
+
+/** The outcome of a call wrapped in {@link safeCall}; it never throws. */
+export type WorkBuddySafeCall<T> =
+  | { ok: true, value: T }
+  | { ok: false, error: WorkBuddyDegradedError }
+
+/**
+ * Redact token-like content from a message that is about to be displayed.
+ *
+ * The same two rules the CLI and the card already apply: a JWT-shaped string is
+ * replaced whole, and a `token=`-style query value loses its value. Kept here
+ * because upstream messages reach three readers (log, CLI, browser).
+ */
+export function safeUpstreamMessage(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error))
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/gu, '[redacted token]')
+    .replace(/(\b(?:code|token|refresh_token|access_token)=)[^&\s]+/giu, '$1[redacted]')
+    .slice(0, 500)
+}
+
+/**
+ * Fold one failure into the closed degradation vocabulary.
+ *
+ * The classification is message-shaped on purpose: the upstream client throws
+ * different error types depending on where the failure happened (`fetch` throws
+ * a `TypeError`, the envelope reader a plain `Error`, the credential helper its
+ * own class), and the browser half cannot receive any of them. Only the closed
+ * code crosses that boundary.
+ *
+ * Where several patterns match, the order below is the decision: a decryption
+ * failure mentions `key`, a rate limit answers `429`, a shape failure mentions
+ * non-JSON, a transport failure mentions `fetch`, and a session failure
+ * mentions sign-in. A failure that matches nothing is reported as unreachable —
+ * the conservative class, because an unread failure is not evidence that the
+ * upstream changed protocol.
+ */
+export function classifyWorkBuddyFailure(stage: WorkBuddyCallStage, error: unknown): WorkBuddyLastError {
+  const message = safeUpstreamMessage(error)
+  if (error instanceof WorkBuddyDegradedError) {
+    return { stage: error.stage, code: error.code, message }
+  }
+  const name = error instanceof Error ? error.name : ''
+  const text = `${name} ${message}`
+  let code: WorkBuddyDegradationCode
+  if (/KeyUnavailable|decrypt|at-rest|protector|加密|密钥|unwrapp/iu.test(text)) {
+    code = 'CREDENTIAL_DECRYPT_FAILED'
+  } else if (/rate.?limit|too many requests|限流|频繁|\(http 429\)|\b429\b/iu.test(text)) {
+    code = 'RATE_LIMITED'
+  } else if (/non-JSON|unexpected document|no recognised|not recognised|unrecognized|no accessToken|protocol|\(http 404\)|\(http 410\)/iu.test(text)) {
+    code = 'UPSTREAM_PROTOCOL_CHANGED'
+  } else if (/fetch failed|network|transport|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|timed out|timeout|socket|aborted|AbortError|\(http 5\d\d\)/iu.test(text)) {
+    code = 'UPSTREAM_UNREACHABLE'
+  } else if (/未找到已登录|sign in|登录|session|访问令牌|expired|\(http 401\)/iu.test(text)) {
+    code = 'CREDENTIAL_MISSING'
+  } else {
+    // Registration performs no request: an unexplained failure there is the
+    // host seam (cordis / pi-ai generation) rather than a network problem.
+    code = stage === 'registration' ? 'UPSTREAM_PROTOCOL_CHANGED' : 'UPSTREAM_UNREACHABLE'
+  }
+  return { stage, code, message }
+}
+
+/** Client-facing health for one degradation class. */
+export function clientHealthOf(code: WorkBuddyDegradationCode): WorkBuddyClientHealth {
+  switch (code) {
+    case 'RATE_LIMITED':
+    case 'UPSTREAM_UNREACHABLE':
+      // The path may recover on its own: retry later.
+      return 'degraded'
+    case 'CREDENTIAL_MISSING':
+    case 'CREDENTIAL_DECRYPT_FAILED':
+    case 'UPSTREAM_PROTOCOL_CHANGED':
+      // A credential fix or a plugin change is needed: nothing to serve.
+      return 'down'
+  }
+}
+
+/**
+ * Tri-state health for one degradation class.
+ *
+ * `credential_invalid` is the only class the user can fix themselves; every
+ * other failure is grouped under `upstream_changed` because the action (wait,
+ * or accept that the upstream moved on) is the same.
+ */
+export function healthStateOf(code: WorkBuddyDegradationCode): WorkBuddyHealthState {
+  return code === 'CREDENTIAL_MISSING' || code === 'CREDENTIAL_DECRYPT_FAILED'
+    ? 'credential_invalid'
+    : 'upstream_changed'
+}
+
+/** Map an HTTP-level failure class onto the degradation vocabulary. */
+function degradationCodeOfKind(kind: UpstreamErrorKind): WorkBuddyDegradationCode {
+  switch (kind) {
+    case 'soft_rate':
+    case 'hard_credit':
+      // Both refuse service for now: a rate limit clears by itself, and an
+      // exhausted quota recovers when the cycle resets or credit is added.
+      return 'RATE_LIMITED'
+    case 'session_dead':
+      return 'CREDENTIAL_MISSING'
+    case 'not_found':
+    case 'client':
+      // The endpoint no longer answers a request this client shape should be
+      // able to make: that is the signature of an upstream change.
+      return 'UPSTREAM_PROTOCOL_CHANGED'
+    case 'server':
+      return 'UPSTREAM_UNREACHABLE'
+  }
+}
+
+/**
+ * Run one call, folding any failure into {@link WorkBuddyDegradedError}.
+ *
+ * The whole point is that the caller never receives a foreign exception: a
+ * provider-registration failure, a catalog fetch failure, and a check-in
+ * failure all become the same `{ ok: false, error }` pair, so startup can log
+ * one line and the UI can render one code instead of crashing on shapes it has
+ * never seen.
+ */
+export async function safeCall<T>(stage: WorkBuddyCallStage, call: () => Promise<T>): Promise<WorkBuddySafeCall<T>> {
+  try {
+    return { ok: true, value: await call() }
+  } catch (error: unknown) {
+    if (error instanceof WorkBuddyDegradedError) return { ok: false, error }
+    const classified = classifyWorkBuddyFailure(stage, error)
+    return { ok: false, error: new WorkBuddyDegradedError(stage, classified.code, classified.message, { cause: error }) }
+  }
+}
+
+/**
+ * Hold the degradation state of one client instance.
+ *
+ * State lives beside the calls rather than in a module global: the two variants
+ * fail independently, and a failure in the international endpoint must not make
+ * the CN card report a degraded health.
+ */
+export class WorkBuddyHealthTracker {
+  private state: WorkBuddyClientHealth = 'ok'
+  private last: WorkBuddyLastError | undefined
+
+  /** Health after the most recent recorded call. */
+  get health(): WorkBuddyClientHealth {
+    return this.state
+  }
+
+  /** The most recent failure, cleared by the next successful call. */
+  get lastError(): WorkBuddyLastError | undefined {
+    return this.last
+  }
+
+  /** Fold a thrown failure into the tracker; returns the classified record. */
+  record(stage: WorkBuddyCallStage, error: unknown): WorkBuddyLastError {
+    const lastError = error instanceof WorkBuddyDegradedError
+      ? { stage: error.stage, code: error.code, message: safeUpstreamMessage(error) }
+      : classifyWorkBuddyFailure(stage, error)
+    this.last = lastError
+    this.state = clientHealthOf(lastError.code)
+    return lastError
+  }
+
+  /** A successful call proves the path works again; drop the stale diagnosis. */
+  clear(): void {
+    this.state = 'ok'
+    this.last = undefined
+  }
+}
+
+/**
  * Extract a user-facing error message from an upstream JSON response body.
  * Prefers WorkBuddy's localized `displayMsg.zh` / `displayMsg.en`, falling back to `msg`.
  */
@@ -659,9 +855,13 @@ async function readEnvelope(response: Response): Promise<Envelope> {
 }
 
 /** Fail an envelope whose business code is non-zero, classified like HTTP errors. */
-function envelopeError(status: number, envelope: Envelope): Error {
+function envelopeError(status: number, envelope: Envelope, stage: WorkBuddyCallStage): Error {
   const kind = classifyUpstreamError(status, envelope.msg)
-  return new Error(`workbuddy upstream ${kind} (http ${status}): ${envelope.msg.slice(0, 160)}`)
+  return new WorkBuddyDegradedError(
+    stage,
+    degradationCodeOfKind(kind),
+    `workbuddy upstream ${kind} (http ${status}): ${envelope.msg.slice(0, 160)}`,
+  )
 }
 
 /** Provenance of one successful catalog fetch, surfaced by the status card. */
@@ -812,9 +1012,57 @@ export class WorkBuddyUpstreamClient {
   /** Provenance of the most recent successful catalog fetch, for the card. */
   lastCatalog: WorkBuddyCatalogFetch | undefined
 
+  /** Degradation state after the most recent call; see {@link WorkBuddyHealthTracker}. */
+  private readonly degradation = new WorkBuddyHealthTracker()
+
   constructor(options: WorkBuddyUpstreamClientOptions = {}) {
     this.resolveAppVersion = options.resolveAppVersion ?? (() => resolveAppVersion())
     this.resolveChatIdentity = options.resolveChatIdentity ?? (region => resolveChatIdentity(region))
+  }
+
+  /** `ok` while the last call succeeded; `degraded`/`down` after a classified failure. */
+  get health(): WorkBuddyClientHealth {
+    return this.degradation.health
+  }
+
+  /** Stage, code, and redacted upstream message of the most recent failure. */
+  get lastError(): WorkBuddyLastError | undefined {
+    return this.degradation.lastError
+  }
+
+  /**
+   * Record a failure that happened outside this client's own calls.
+   *
+   * Provider registration (see `index.ts`) fails before any HTTP call exists,
+   * and its failure is exactly what the status card should show when the
+   * variant never came up — so the tracker accepts an externally classified
+   * failure rather than only its own.
+   */
+  noteFailure(stage: WorkBuddyCallStage, error: unknown): WorkBuddyLastError {
+    return this.degradation.record(stage, error)
+  }
+
+  /** Record a successful out-of-band operation (e.g. provider registration). */
+  noteSuccess(): void {
+    this.degradation.clear()
+  }
+
+  /**
+   * Run one call, record its outcome, and rethrow on failure.
+   *
+   * The rethrown error is always a {@link WorkBuddyDegradedError} whose message
+   * matches what the caller would have seen before, so callers that already
+   * catch and display the message keep working while the code becomes
+   * available to the status route.
+   */
+  private async guarded<T>(stage: WorkBuddyCallStage, call: () => Promise<T>): Promise<T> {
+    const outcome = await safeCall(stage, call)
+    if (outcome.ok) {
+      this.degradation.clear()
+      return outcome.value
+    }
+    this.degradation.record(stage, outcome.error)
+    throw outcome.error
   }
 
   /** POST the chat endpoint; a successful answer is the raw SSE response. */
@@ -845,37 +1093,56 @@ export class WorkBuddyUpstreamClient {
         ...signal === undefined ? {} : { signal },
       })
     } catch (error: unknown) {
+      // Chat keeps its classified-failure return shape; the degradation state
+      // is recorded beside it so the picker can mark the group.
+      this.degradation.record('chat', error)
       return { ok: false, status: 0, kind: 'server', message: `transport error: ${String(error)}` }
     }
-    if (response.ok) return { ok: true, response }
+    if (response.ok) {
+      this.degradation.clear()
+      return { ok: true, response }
+    }
     const text = (await response.text()).slice(0, ERROR_BODY_LIMIT)
+    const kind = classifyUpstreamError(response.status, text)
+    // A request-specific rejection (a bad parameter, an id this account cannot
+    // use) says nothing about the other models on the route, so it must not
+    // mark the whole provider degraded; the classes that mean "the route is
+    // unusable right now" are recorded.
+    if (kind !== 'client' && kind !== 'not_found') {
+      this.degradation.record('chat', new WorkBuddyDegradedError('chat', degradationCodeOfKind(kind), text === '' ? `http ${response.status}` : text))
+    }
     return {
       ok: false,
       status: response.status,
-      kind: classifyUpstreamError(response.status, text),
+      kind,
       message: text,
     }
   }
 
   /** POST the token-refresh endpoint; the caller merges the outcome. */
   async refreshToken(credential: WorkBuddyCredential): Promise<WorkBuddyRefreshOutcome> {
-    const response = await fetch(`${chatBase(credential)}/v2/plugin/auth/token/refresh`, {
-      method: 'POST',
-      headers: refreshHeaders(credential),
-      signal: AbortSignal.timeout(JSON_TIMEOUT_MS),
+    // Wrapped in the degradation boundary: the credential store's single-flight
+    // refresh funnels every caller through here, so one classified failure is
+    // what the status card sees instead of a raw `fetch` TypeError.
+    return await this.guarded('refresh', async () => {
+      const response = await fetch(`${chatBase(credential)}/v2/plugin/auth/token/refresh`, {
+        method: 'POST',
+        headers: refreshHeaders(credential),
+        signal: AbortSignal.timeout(JSON_TIMEOUT_MS),
+      })
+      const envelope = await readEnvelope(response)
+      if (!response.ok || envelope.code !== 0) throw envelopeError(response.status, envelope, 'refresh')
+      const data = typeof envelope.data === 'object' && envelope.data !== null
+        ? envelope.data as Record<string, unknown>
+        : {}
+      const accessToken = typeof data['accessToken'] === 'string' ? data['accessToken'] : ''
+      if (accessToken === '') throw new WorkBuddyDegradedError('refresh', 'UPSTREAM_PROTOCOL_CHANGED', 'workbuddy token refresh returned no accessToken; sign in again in the WorkBuddy app')
+      const outcome: WorkBuddyRefreshOutcome = { accessToken }
+      if (typeof data['refreshToken'] === 'string' && data['refreshToken'] !== '') outcome.refreshToken = data['refreshToken']
+      if (typeof data['expiresIn'] === 'number' && data['expiresIn'] > 0) outcome.expiresInSec = data['expiresIn']
+      if (typeof data['domain'] === 'string' && data['domain'] !== '') outcome.domain = data['domain']
+      return outcome
     })
-    const envelope = await readEnvelope(response)
-    if (!response.ok || envelope.code !== 0) throw envelopeError(response.status, envelope)
-    const data = typeof envelope.data === 'object' && envelope.data !== null
-      ? envelope.data as Record<string, unknown>
-      : {}
-    const accessToken = typeof data['accessToken'] === 'string' ? data['accessToken'] : ''
-    if (accessToken === '') throw new Error('workbuddy token refresh returned no accessToken; sign in again in the WorkBuddy app')
-    const outcome: WorkBuddyRefreshOutcome = { accessToken }
-    if (typeof data['refreshToken'] === 'string' && data['refreshToken'] !== '') outcome.refreshToken = data['refreshToken']
-    if (typeof data['expiresIn'] === 'number' && data['expiresIn'] > 0) outcome.expiresInSec = data['expiresIn']
-    if (typeof data['domain'] === 'string' && data['domain'] !== '') outcome.domain = data['domain']
-    return outcome
   }
 
   /**
@@ -914,47 +1181,49 @@ export class WorkBuddyUpstreamClient {
    * such rather than as a generic catalog failure.
    */
   async fetchModels(credential: WorkBuddyCredential, signal?: AbortSignal): Promise<readonly WorkBuddyUpstreamModel[]> {
-    const international = regionOf(credential.domain) === 'global'
-    // `this.resolveAppVersion`, not the module-level function: the constructor
-    // injects a resolver so tests never read the real filesystem, and calling
-    // the module function directly made that seam inert.
-    const appVersion = international ? await this.resolveAppVersion() : undefined
-    const response = await fetch(`${chatBase(credential)}/v3/config`, {
-      headers: {
-        Authorization: `Bearer ${credential.accessToken}`,
-        Accept: 'application/json',
-        Origin: originReferer(credential),
-        Referer: `${originReferer(credential)}/`,
-        ...international ? { 'X-Requested-With': 'XMLHttpRequest', 'X-Product': 'SaaS' } : identityHeaders(credential),
-        'User-Agent': appVersion === undefined ? CLIENT_UA : appUserAgent(appVersion.version),
-      },
-      signal: signal === undefined
-        ? AbortSignal.timeout(JSON_TIMEOUT_MS)
-        : AbortSignal.any([signal, AbortSignal.timeout(JSON_TIMEOUT_MS)]),
+    return await this.guarded('catalog', async () => {
+      const international = regionOf(credential.domain) === 'global'
+      // `this.resolveAppVersion`, not the module-level function: the constructor
+      // injects a resolver so tests never read the real filesystem, and calling
+      // the module function directly made that seam inert.
+      const appVersion = international ? await this.resolveAppVersion() : undefined
+      const response = await fetch(`${chatBase(credential)}/v3/config`, {
+        headers: {
+          Authorization: `Bearer ${credential.accessToken}`,
+          Accept: 'application/json',
+          Origin: originReferer(credential),
+          Referer: `${originReferer(credential)}/`,
+          ...international ? { 'X-Requested-With': 'XMLHttpRequest', 'X-Product': 'SaaS' } : identityHeaders(credential),
+          'User-Agent': appVersion === undefined ? CLIENT_UA : appUserAgent(appVersion.version),
+        },
+        signal: signal === undefined
+          ? AbortSignal.timeout(JSON_TIMEOUT_MS)
+          : AbortSignal.any([signal, AbortSignal.timeout(JSON_TIMEOUT_MS)]),
+      })
+      const envelope = await readEnvelope(response)
+      if (!response.ok || envelope.code !== 0) throw envelopeError(response.status, envelope, 'catalog')
+      // Two catalog shapes share this path. The endpoints wrap their answer in
+      // `{code,msg,data}`, but `/v3/config` has also been observed answering with
+      // the product document bare at the top level (no wrapper at all). Treating
+      // a missing `data` as an empty document turned that second shape into a
+      // spurious "no cli agent models", so a body that itself looks like a
+      // catalog (it carries models or agents) is used as the answer. A body with
+      // neither shape still falls through to the empty-parse error below.
+      const data = isObject(envelope.data) ? envelope.data
+        : 'models' in envelope.document || 'agents' in envelope.document ? envelope.document
+        : {}
+      // Promo badges exist only in the console document, so CN merges them in.
+      // The read is best-effort and separate: its failure costs the badges and
+      // never the catalog.
+      const promoBadges = international ? undefined : await this.fetchPromoBadges(credential, signal)
+      const models = parseModelCatalog(data, international, promoBadges)
+      this.lastCatalog = {
+        fetchedAtMs: Date.now(),
+        source: international ? 'workbuddy-ai:app' : 'workbuddy:cli',
+        ...appVersion === undefined ? {} : { appVersion },
+      }
+      return models
     })
-    const envelope = await readEnvelope(response)
-    if (!response.ok || envelope.code !== 0) throw envelopeError(response.status, envelope)
-    // Two catalog shapes share this path. The endpoints wrap their answer in
-    // `{code,msg,data}`, but `/v3/config` has also been observed answering with
-    // the product document bare at the top level (no wrapper at all). Treating
-    // a missing `data` as an empty document turned that second shape into a
-    // spurious "no cli agent models", so a body that itself looks like a
-    // catalog (it carries models or agents) is used as the answer. A body with
-    // neither shape still falls through to the empty-parse error below.
-    const data = isObject(envelope.data) ? envelope.data
-      : 'models' in envelope.document || 'agents' in envelope.document ? envelope.document
-      : {}
-    // Promo badges exist only in the console document, so CN merges them in.
-    // The read is best-effort and separate: its failure costs the badges and
-    // never the catalog.
-    const promoBadges = international ? undefined : await this.fetchPromoBadges(credential, signal)
-    const models = parseModelCatalog(data, international, promoBadges)
-    this.lastCatalog = {
-      fetchedAtMs: Date.now(),
-      source: international ? 'workbuddy-ai:app' : 'workbuddy:cli',
-      ...appVersion === undefined ? {} : { appVersion },
-    }
-    return models
   }
 
   /**
@@ -1028,70 +1297,72 @@ export class WorkBuddyUpstreamClient {
    * moved onto an unmeasured one.
    */
   async fetchCredits(credential: WorkBuddyCredential): Promise<WorkBuddyCredits> {
-    if (regionOf(credential.domain) === 'cn'
-      && credential.enterpriseId !== undefined && credential.enterpriseId !== '') {
-      return await this.fetchEnterpriseCredits(credential)
-    }
-    const now = new Date()
-    const format = (date: Date): string => [
-      date.getFullYear().toString().padStart(4, '0'),
-      (date.getMonth() + 1).toString().padStart(2, '0'),
-      date.getDate().toString().padStart(2, '0'),
-    ].join('-') + ' ' + [
-      date.getHours().toString().padStart(2, '0'),
-      date.getMinutes().toString().padStart(2, '0'),
-      date.getSeconds().toString().padStart(2, '0'),
-    ].join(':')
-    const response = await fetch(`${billingBase(credential)}/v2/billing/meter/get-user-resource`, {
-      method: 'POST',
-      headers: billingHeaders(credential),
-      body: JSON.stringify({
-        PageNumber: 1,
-        PageSize: 100,
-        ProductCode: 'p_tcaca',
-        Status: [0, 3],
-        PackageEndTimeRangeBegin: format(now),
-        PackageEndTimeRangeEnd: format(new Date(now.getTime() + 365 * 101 * 24 * 3600 * 1000)),
-      }),
-      signal: AbortSignal.timeout(JSON_TIMEOUT_MS),
-    })
-    const envelope = await readEnvelope(response)
-    if (!response.ok || envelope.code !== 0) throw envelopeError(response.status, envelope)
-    const responseWrapper = typeof envelope.data === 'object' && envelope.data !== null
-      ? envelope.data as Record<string, unknown>
-      : {}
-    const data = typeof responseWrapper['Response'] === 'object' && responseWrapper['Response'] !== null
-      ? responseWrapper['Response'] as Record<string, unknown>
-      : {}
-    const inner = typeof data['Data'] === 'object' && data['Data'] !== null
-      ? data['Data'] as Record<string, unknown>
-      : {}
-    const rawAccounts = Array.isArray(inner['Accounts']) ? inner['Accounts'] : []
-    const accounts: WorkBuddyCreditAccount[] = []
-    let total = 0
-    for (const raw of rawAccounts) {
-      if (typeof raw !== 'object' || raw === null) continue
-      const account = raw as Record<string, unknown>
-      const numberField = (key: string): number => (typeof account[key] === 'number' ? account[key] as number : 0)
-      const size = numberField('CycleCapacitySize')
-      const cycleRemain = numberField('CycleCapacityRemain')
-      const cycleUsed = numberField('CycleCapacityUsed')
-      const capacityRemain = numberField('CapacityRemain')
-      let remain: number
-      if (size > 0) remain = cycleRemain
-      else if (cycleRemain > 0 || cycleUsed > 0) remain = cycleRemain
-      else remain = capacityRemain
-      if (remain < 0) remain = 0
-      total += remain
-      const endTimeMs = parseCycleEndTime(account['CycleEndTime'])
-      accounts.push({
-        packageName: typeof account['PackageName'] === 'string' ? account['PackageName'] : '(unnamed)',
-        remain,
-        size: size > 0 ? size : numberField('CapacitySize'),
-        ...endTimeMs === undefined ? {} : { endTimeMs },
+    return await this.guarded('credits', async () => {
+      if (regionOf(credential.domain) === 'cn'
+        && credential.enterpriseId !== undefined && credential.enterpriseId !== '') {
+        return await this.fetchEnterpriseCredits(credential)
+      }
+      const now = new Date()
+      const format = (date: Date): string => [
+        date.getFullYear().toString().padStart(4, '0'),
+        (date.getMonth() + 1).toString().padStart(2, '0'),
+        date.getDate().toString().padStart(2, '0'),
+      ].join('-') + ' ' + [
+        date.getHours().toString().padStart(2, '0'),
+        date.getMinutes().toString().padStart(2, '0'),
+        date.getSeconds().toString().padStart(2, '0'),
+      ].join(':')
+      const response = await fetch(`${billingBase(credential)}/v2/billing/meter/get-user-resource`, {
+        method: 'POST',
+        headers: billingHeaders(credential),
+        body: JSON.stringify({
+          PageNumber: 1,
+          PageSize: 100,
+          ProductCode: 'p_tcaca',
+          Status: [0, 3],
+          PackageEndTimeRangeBegin: format(now),
+          PackageEndTimeRangeEnd: format(new Date(now.getTime() + 365 * 101 * 24 * 3600 * 1000)),
+        }),
+        signal: AbortSignal.timeout(JSON_TIMEOUT_MS),
       })
-    }
-    return { total, accounts, ...summariseExpiry(accounts, now.getTime()) }
+      const envelope = await readEnvelope(response)
+      if (!response.ok || envelope.code !== 0) throw envelopeError(response.status, envelope, 'credits')
+      const responseWrapper = typeof envelope.data === 'object' && envelope.data !== null
+        ? envelope.data as Record<string, unknown>
+        : {}
+      const data = typeof responseWrapper['Response'] === 'object' && responseWrapper['Response'] !== null
+        ? responseWrapper['Response'] as Record<string, unknown>
+        : {}
+      const inner = typeof data['Data'] === 'object' && data['Data'] !== null
+        ? data['Data'] as Record<string, unknown>
+        : {}
+      const rawAccounts = Array.isArray(inner['Accounts']) ? inner['Accounts'] : []
+      const accounts: WorkBuddyCreditAccount[] = []
+      let total = 0
+      for (const raw of rawAccounts) {
+        if (typeof raw !== 'object' || raw === null) continue
+        const account = raw as Record<string, unknown>
+        const numberField = (key: string): number => (typeof account[key] === 'number' ? account[key] as number : 0)
+        const size = numberField('CycleCapacitySize')
+        const cycleRemain = numberField('CycleCapacityRemain')
+        const cycleUsed = numberField('CycleCapacityUsed')
+        const capacityRemain = numberField('CapacityRemain')
+        let remain: number
+        if (size > 0) remain = cycleRemain
+        else if (cycleRemain > 0 || cycleUsed > 0) remain = cycleRemain
+        else remain = capacityRemain
+        if (remain < 0) remain = 0
+        total += remain
+        const endTimeMs = parseCycleEndTime(account['CycleEndTime'])
+        accounts.push({
+          packageName: typeof account['PackageName'] === 'string' ? account['PackageName'] : '(unnamed)',
+          remain,
+          size: size > 0 ? size : numberField('CapacitySize'),
+          ...endTimeMs === undefined ? {} : { endTimeMs },
+        })
+      }
+      return { total, accounts, ...summariseExpiry(accounts, now.getTime()) }
+    })
   }
 
   /**
@@ -1118,7 +1389,7 @@ export class WorkBuddyUpstreamClient {
       signal: AbortSignal.timeout(JSON_TIMEOUT_MS),
     })
     const envelope = await readEnvelope(response)
-    if (!response.ok || envelope.code !== 0) throw envelopeError(response.status, envelope)
+    if (!response.ok || envelope.code !== 0) throw envelopeError(response.status, envelope, 'credits')
     // The official reader accepts the payload at `data.data`, `data`, or the
     // envelope itself; the observed CN answer puts the fields at `data`.
     const sources: Record<string, unknown>[] = []

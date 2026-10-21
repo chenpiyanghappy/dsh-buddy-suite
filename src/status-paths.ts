@@ -217,6 +217,63 @@ export interface WorkBuddyWebModelBadge {
 }
 
 /**
+ * Which part of the plugin was in flight when an upstream call failed.
+ *
+ * The stage is reported beside the error code because "the upstream is
+ * unreachable while reading the catalog" and "…while refreshing the token" are
+ * different diagnoses: the first leaves a usable credential and a stale list,
+ * the second is why nothing works at all.
+ */
+export type WorkBuddyCallStage =
+  | 'credential'
+  | 'refresh'
+  | 'catalog'
+  | 'credits'
+  | 'chat'
+  | 'checkin'
+  | 'registration'
+
+/**
+ * The closed set of degradation classes every upstream failure is folded into.
+ *
+ * Deliberately coarse: the host, the browser card, and the CLI all branch on
+ * these five values, so adding one is a breaking change for every reader. The
+ * raw upstream message travels separately in {@link WorkBuddyLastError.message}
+ * for diagnosis.
+ */
+export type WorkBuddyDegradationCode =
+  /** No credential is available: nobody signed in, or the session was rejected. */
+  | 'CREDENTIAL_MISSING'
+  /** A credential exists but could not be opened (at-rest key helper failed). */
+  | 'CREDENTIAL_DECRYPT_FAILED'
+  /** The upstream could not be reached: transport failure, timeout, 5xx. */
+  | 'UPSTREAM_UNREACHABLE'
+  /** The upstream answered, but not in a shape this plugin understands. */
+  | 'UPSTREAM_PROTOCOL_CHANGED'
+  /** The upstream refused service for now: rate limit or exhausted quota. */
+  | 'RATE_LIMITED'
+
+/** One upstream failure, in the shape the card and the CLI report it. */
+export interface WorkBuddyLastError {
+  stage: WorkBuddyCallStage
+  code: WorkBuddyDegradationCode
+  /** Short diagnostic text from the upstream, already redacted for display. */
+  message: string
+}
+
+/**
+ * Three-state health vocabulary shared by the status route, the card lamp, and
+ * the `status` / `doctor` commands.
+ *
+ * The question it answers is "who has to act?", which the client-facing
+ * `ok`/`degraded`/`down` vocabulary does not: `plugin_ok` means nothing is
+ * wrong, `credential_invalid` means the user must sign in again, and
+ * `upstream_changed` means the upstream (or the network) is behaving in a way
+ * no credential fix can help with.
+ */
+export type WorkBuddyHealthState = 'plugin_ok' | 'upstream_changed' | 'credential_invalid'
+
+/**
  * Why no credential is usable, as a closed enum the browser half switches on.
  *
  * Deliberately separate from `reason`: `reason` is free text meant for a human,
@@ -263,6 +320,10 @@ export type WorkBuddyWebStatus =
     status: 'signed-out'
     reason?: string
     reasonCode?: WorkBuddySignedOutReasonCode
+    /** Tri-state health the card lamp and CLI render. */
+    health?: WorkBuddyHealthState
+    /** The failure behind a non-`plugin_ok` health, when there is one. */
+    lastError?: WorkBuddyLastError
   }
   | {
     status: 'signed-in'
@@ -278,6 +339,10 @@ export type WorkBuddyWebStatus =
     useMaximumContextWindow?: boolean
     visibility?: WorkBuddyWebVisibilitySection
     probeKey?: string
+    /** Tri-state health the card lamp and CLI render. */
+    health?: WorkBuddyHealthState
+    /** The failure behind a non-`plugin_ok` health, when there is one. */
+    lastError?: WorkBuddyLastError
     /**
      * Which composer annotations this plugin should render.
      *
@@ -287,7 +352,14 @@ export type WorkBuddyWebStatus =
      */
     ui?: WorkBuddyWebUiPreferences
   }
-  | { status: 'error'; message: string }
+  | {
+    status: 'error'
+    message: string
+    /** Tri-state health, when the producer could classify the failure. */
+    health?: WorkBuddyHealthState
+    /** The classified failure behind the error document, when available. */
+    lastError?: WorkBuddyLastError
+  }
 
 /**
  * Composer-chrome visibility, as the browser half reads it.
@@ -301,6 +373,17 @@ export interface WorkBuddyWebUiPreferences {
   /** Render the reasoning-level entry beside the composer. */
   showReasoningLevels: boolean
 }
+
+/**
+ * The failures that make a same-day retry pointless.
+ *
+ * A rate limit is answered when the upstream has recovered, and a protocol
+ * change is not something the plugin may push through by retrying, so the
+ * check-in half stops asking for the rest of the day instead of spending one
+ * failed request per panel open. The code travels on the wire so the panel can
+ * say why a row is not being retried.
+ */
+export type BuddyCheckinStopCode = 'RATE_LIMITED' | 'UPSTREAM_PROTOCOL_CHANGED'
 
 /**
  * One account's check-in outcome, as the details panel displays it.
@@ -327,6 +410,8 @@ export interface BuddyCheckinRow {
   balanceError?: string
   /** Why the check-in itself failed. */
   error?: string
+  /** Why no retry will be attempted for this row today, when that is the case. */
+  stopCode?: BuddyCheckinStopCode
 }
 
 /**

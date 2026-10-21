@@ -155,6 +155,23 @@ export const en = {
   checkingForUpdates: 'Checking…',
   updateCheckUnavailable: 'Update information is unavailable right now. Check again later.',
   agentUpgradePrompt: 'Please open {repository}, check its latest version, and install or update the plugin "dsh-buddy-suite" in my current DSH profile following the project README (the install command differs by profile). After upgrading, fully quit and restart DSH.',
+  /*
+   * Deprecation announcement (end-of-life notice).
+   *
+   * Written to be factual and final, not promotional: the project is not
+   * claimed to work, is not offered as a usable archival substitute, and does
+   * not recommend that anyone keep using it. The issue list is explicitly
+   * labelled as history, not as a capability promise.
+   */
+  deprecationHeading: 'No longer maintained · this project has reached the end of its life',
+  deprecationFinalVersion: 'Archived and closed out as final release {version}.',
+  deprecationReality: 'Measured on a real machine: under WorkBuddy\'s restrictions effective 2026-10-20, connecting to WorkBuddy models through a non-official client is no longer workable. The upstream project dsh-workbuddy-connect has stopped maintenance and is scheduled to shut down on 2026-10-22.',
+  deprecationNoPromise: 'This project does not claim to remain usable, is not offered as a usable archival substitute, and does not recommend that anyone keep using this approach. To use WorkBuddy models, use the official WorkBuddy client.',
+  deprecationHistory: 'Historical record only, not a capability promise: error diagnosis (#199), per-model context and reasoning-level control (#186/#96), visibility toggles (#181/#168), credit display (#183), existing failing tests fixed up to 360 (#165), four-channel release distribution (#180/#176/#175/#160/#158), credential robustness and the Windows "recycled PID" guard; this release also carries T1 graceful degradation, T2 health routing, and T4 credential isolation.',
+  deprecationThanks: 'Thank you to every user, issue reporter, and contributor.',
+  healthPluginOk: 'Plugin status: healthy',
+  healthUpstreamChanged: 'Upstream or network anomaly — retry later or check the connection',
+  healthCredentialInvalid: 'Credential invalid — sign in again in the WorkBuddy app',
 } as const
 
 export type WorkBuddySettingsKey = keyof typeof en
@@ -332,4 +349,13 @@ export const zh: Record<WorkBuddySettingsKey, string> = {
   checkingForUpdates: '检查中…',
   updateCheckUnavailable: '暂时无法获取更新信息，请稍后再试。',
   agentUpgradePrompt: '请打开 {repository}，查看最新版本，并按项目 README 把插件 dsh-buddy-suite 安装或更新到我当前使用的 DSH profile（不同 profile 的安装命令不同）。升级完成后请完全退出并重启 DSH。',
+  deprecationHeading: '已停止维护 · 本项目已走到生命末尾',
+  deprecationFinalVersion: '以最终版本 {version} 归档收尾。',
+  deprecationReality: '经真机实测，在 WorkBuddy 自 2026-10-20 起实施的限制下，非官方客户端接入 WorkBuddy 模型的方案已不可行；上游项目 dsh-workbuddy-connect 也已停止维护，并计划于 2026-10-22 下线。本项目尊重这一边界，不再适配 WorkBuddy 私有协议。',
+  deprecationNoPromise: '本项目不声称仍可用，不作为「可用的存档替代」提供，也不建议他人继续沿用此方案。若需接入 WorkBuddy 模型，请使用官方 WorkBuddy 客户端。',
+  deprecationHistory: '以下仅为历史记录，不构成任何能力承诺：上游 issue 中记录的错误诊断（#199）、按模型上下文与推理档位控制（#186/#96）、可见性开关（#181/#168）、积分展示（#183）、存量失败测试修复至 360 项（#165）、四路发布分发（#180/#176/#175/#160/#158）、凭据健壮性与 Windows「回收 PID」保护；本版另含 T1 优雅降级、T2 健康路由、T4 凭据隔离。',
+  deprecationThanks: '感谢每一位用户、issue 报告者与贡献者。',
+  healthPluginOk: '插件状态：正常',
+  healthUpstreamChanged: '上游或网络异常，可稍后重试或检查网络连接',
+  healthCredentialInvalid: '登录凭据无效，请在 WorkBuddy App 中重新登录',
 }

@@ -1,10 +1,20 @@
 # DSH Buddy Suite
 
+> **本项目已停止维护并归档，`0.1.3-final` 是最终版本。**
+>
+> **停更定性**：经真机实测，非官方客户端接入 WorkBuddy 模型的方案在 WorkBuddy 2026-10-20 起的限制下**已不可行**；本项目因此走到当前生命末尾，以 `0.1.3-final` 作为归档版本收尾。**本插件不声称可用，也不推荐他人继续沿用此方案**；若需接入 WorkBuddy 模型，请使用官方 WorkBuddy 客户端。
+>
+> **背景与边界**：2026 年 10 月 20 日起，WorkBuddy 开始限制非官方客户端发出的请求；上游依赖 [`dsh-workbuddy-connect`](https://github.com/corrinehu/dsh-workbuddy-connect) 已停止维护，并计划于 2026 年 10 月 22 日下线（以其公告原文为准）。本项目同样尊重这一边界，不再继续适配 WorkBuddy 私有协议；不再处理新功能请求与 PR，不再提供更新、兼容性修复及问题支持。
+>
+> **历史记录（非能力承诺）**：在 upstream 停更前，本插件曾先行补齐其 issue 中记录的若干能力与修复——错误诊断（#199）、上下文 / 推理档位控制（#186 / #96）、可见性开关（#181 / #168）、积分展示（#183）、单测 172 → 360（#165）、四路发布分发（#180 / #176 / #175 / #160 / #158）、凭据健壮性与 Windows「回收 PID」保护，以及本次收尾的 T1 优雅降级 / T2 健康路由 / T4 凭证隔离。以上仅供了解来龙去脉，不构成「该方案仍可用」的暗示。
+>
+> **致谢**：感谢一路使用的用户。代码与文档保留原样，供参考与个人学习研究；不保证在任何 WorkBuddy / DeepSeek Harness 版本上继续工作，也不推荐继续使用。支持范围见 [`COMPATIBILITY.md`](./COMPATIBILITY.md)。
+
 [![Listed on dsh-plugin.org](https://dsh-plugin.org/badges/listed.svg)](https://dsh-plugin.org/plugins/chenpiyanghappy/dsh-buddy-suite)
 
 中文 | [English](./README.en.md)
 
-> **状态**：已发布 `v0.1.2` ✅ — [GitHub](https://github.com/chenpiyanghappy/dsh-buddy-suite) · [CNB](https://cnb.cool/chenpiyanghappy/dsh-buddy-suite) · [npm](https://www.npmjs.com/package/dsh-buddy-suite)
+> **状态**：最终版本 `0.1.3-final`（已归档）— [GitHub](https://github.com/chenpiyanghappy/dsh-buddy-suite) · [CNB](https://cnb.cool/chenpiyanghappy/dsh-buddy-suite) · [npm](https://www.npmjs.com/package/dsh-buddy-suite)
 
 > 把 WorkBuddy 桌面端的模型接入 DeepSeek Harness，并自动完成每日签到。**模型接入同时覆盖国内版（WorkBuddy）与国际版（WorkBuddy AI）两套账号**；签到面向本机全部国内版账号。
 
@@ -81,12 +91,13 @@ pnpm run check:offline   # 受限环境（沙箱禁止 spawn）下的等价命�
 
 **持续集成**：`.github/workflows/check.yml` 会在 `main` 的每次推送与所有 PR 上，用 Ubuntu 与 Windows 两个平台跑一遍 `pnpm run check`（Node 22 + pnpm 9 + 锁文件安装）。改动合并前必须先绿。
 
-**想参与改动前，请先看两份清单**：
+**想参与改动前，请先看两份清单**（项目已归档，不再接受 PR，以下清单仅作为历史记录）：
 
 - [`NON-GOALS.md`](./NON-GOALS.md) —— 主动放弃的功能（薅积分自动化、接管登录/刷新、并发探测、逐请求积分明细……）。这些不是"还没做"，是"想清楚了不做"，提 PR 前先看这里。
 - [`KNOWN-ISSUES.md`](./KNOWN-ISSUES.md) —— 未验证项与已知缺陷，对外表述以这份为准。
+- [`COMPATIBILITY.md`](./COMPATIBILITY.md) —— DSH / Node / WorkBuddy 的支持范围与验证状态，随 `0.1.3-final` 冻结。
 
-## 已发布版本
+## 安装（最终版本）
 
 **推荐用 DeepSeek Harness 自带的插件管理器安装**（会写入对应 profile 的 `cordis.patch.yml`，无需手工构建）：
 
@@ -101,7 +112,7 @@ dsh plugin --profile web add dsh-buddy-suite
 npm install dsh-buddy-suite
 ```
 
-安装后由 DeepSeek Harness 按 cordis 插件方式加载（通过 `cordis.patch.yml`）。当前最新版本 `v0.1.2`，发布渠道：
+安装后由 DeepSeek Harness 按 cordis 插件方式加载（通过 `cordis.patch.yml`）。**最终版本为 `0.1.3-final`，安装方式止步于此**——项目已归档，不会再有后续版本。发布渠道：
 
 - **GitHub（含 Release 产物）**：https://github.com/chenpiyanghappy/dsh-buddy-suite ｜ [Releases](https://github.com/chenpiyanghappy/dsh-buddy-suite/releases)
 - **CNB**：https://cnb.cool/chenpiyanghappy/dsh-buddy-suite

@@ -106,7 +106,14 @@ function outcome(row: BuddyCheckinRow): string {
     return `已签到 ${time}${row.credit === undefined ? '' : ` · +${row.credit} 积分`}`
   }
   if (row.state === 'already') return 'App 内今日已签到'
-  return `失败：${row.error ?? '请稍后重试'}`
+  // A stopped row is not going to change by pressing retry, so the line says
+  // so instead of inviting one; the code decides which sentence is true.
+  const retryHint = row.stopCode === 'RATE_LIMITED'
+    ? '（上游限流，今日已停止重试）'
+    : row.stopCode === 'UPSTREAM_PROTOCOL_CHANGED'
+      ? '（上游接口已变更，今日已停止重试）'
+      : ''
+  return `失败：${row.error ?? '请稍后重试'}${retryHint}`
 }
 
 /** One account's balance line, including why it is unavailable when it is. */

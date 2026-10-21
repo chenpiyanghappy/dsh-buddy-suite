@@ -166,7 +166,7 @@ describe('discovery timeouts are sized for a real registry', () => {
    * and the invariant that keeps it from exceeding the budget.
    */
   const source = readFileSync(
-    fileURLToPath(new URL('../src/desktop-credential-protection.ts', import.meta.url)),
+    fileURLToPath(new URL('../src/credential/discover.ts', import.meta.url)),
     'utf8',
   )
 

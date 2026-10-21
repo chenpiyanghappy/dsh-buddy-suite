@@ -18,7 +18,8 @@ import type { WorkBuddyCredentialStore } from './auth.ts'
 import type { WorkBuddyCatalog, WorkBuddyModelInfo } from './catalog.ts'
 import type { WorkBuddyProbeRecord } from './probe-store.ts'
 import type { WorkBuddyShim } from './shim.ts'
-import { normalizeCredits, type WorkBuddyRegion } from './upstream.ts'
+import { normalizeCredits, type WorkBuddyClientHealth, type WorkBuddyRegion } from './upstream.ts'
+import type { WorkBuddyLastError } from './status-paths.ts'
 
 /**
  * Default provider id for this bundle.
@@ -162,6 +163,35 @@ function withCatalogDisplay(name: string, info: WorkBuddyModelInfo): string {
   return suffix === undefined ? name : `${name}${RATE_SEPARATOR}${suffix}`
 }
 
+/**
+ * Mark a model name when the plugin can no longer reach the upstream.
+ *
+ * The `LlmModelInfo` seam that reaches the model picker carries only
+ * `provider`, `id`, `name`, and `inputModalities` — there is no disabled flag
+ * and no tooltip/description channel the picker still reads (0.1.2+ renders the
+ * name alone). A literal grey-out is therefore not expressible from a plugin;
+ * the marker rides the name, which is the one field every selector generation
+ * renders, and the full diagnosis (stage + message) stays on the status card
+ * where there is room for it.
+ *
+ * The label is deliberately a code rather than prose: the host seam has no
+ * locale service, and `UPSTREAM_PROTOCOL_CHANGED`-style codes read the same in
+ * every UI language while a translated sentence would not.
+ */
+function degradationMarker(health: WorkBuddyClientHealth, lastError: WorkBuddyLastError | undefined): string | undefined {
+  if (health === 'ok') return undefined
+  const label = health === 'down' ? '⚠ unavailable' : '⚠ degraded'
+  return lastError === undefined ? label : `${label} (${lastError.code})`
+}
+
+/** Exported for the degradation specs: the marker is the picker's only channel. */
+export { degradationMarker }
+
+/** Append the degradation marker to a picker-visible model name when needed. */
+function withHealthMarker(name: string, marker: string | undefined): string {
+  return marker === undefined ? name : `${name}${RATE_SEPARATOR}${marker}`
+}
+
 /** Constructor dependencies. */
 export interface WorkBuddyAdapterOptions {
   providerId?: string
@@ -195,6 +225,15 @@ export interface WorkBuddyAdapterOptions {
    * therefore lives in this adapter's `listModels` override alone.
    */
   hidden?: () => readonly string[]
+  /**
+   * Live degradation state of the upstream client backing this adapter.
+   *
+   * Optional so the adapter keeps working in tests and in headless callers
+   * that do not wire a client; an absent getter means "healthy".
+   */
+  health?: () => WorkBuddyClientHealth
+  /** The most recent classified failure, used to name the degradation code. */
+  lastError?: () => WorkBuddyLastError | undefined
 }
 
 /** What {@link createWorkBuddyAdapter} hands back. */
@@ -330,10 +369,16 @@ function toPiModel(info: WorkBuddyModelInfo, baseUrl: string, observed: WorkBudd
  * `modelErrors` since 0.1.5-alpha.2 (#12).
  */
 export function createWorkBuddyAdapter(options: WorkBuddyAdapterOptions): WorkBuddyAdapter {
-  const { shim, store, catalog, resolveAttachments, resolveImageAccess, observe, hidden } = options
+  const { shim, store, catalog, resolveAttachments, resolveImageAccess, observe, hidden, health, lastError } = options
   const providerId = options.providerId ?? WORKBUDDY_PROVIDER
   const displayName = options.displayName ?? 'WorkBuddy'
   const region = options.region ?? 'cn'
+
+  /** The picker-visible degradation marker, or undefined while healthy. */
+  const marker = (): string | undefined => degradationMarker(
+    health?.() ?? 'ok',
+    lastError?.(),
+  )
 
   const buildModels = (): Model<Api>[] => {
     // The OpenAI SDK pi-ai drives appends `/chat/completions` to baseURL,
@@ -380,7 +425,7 @@ export function createWorkBuddyAdapter(options: WorkBuddyAdapterOptions): WorkBu
 
   let profiles = new Map<string, ResolvedPiAiProviderProfile>([[providerId, profile]])
 
-  const adapter = new WorkBuddyPiAiAdapter(catalog, hidden ?? (() => []), {
+  const adapter = new WorkBuddyPiAiAdapter(catalog, hidden ?? (() => []), marker, {
     profiles: () => profiles,
     auth: INERT_AUTH,
     // Resolve the shim's per-process shared secret as the OpenAI apiKey so
@@ -430,6 +475,7 @@ class WorkBuddyPiAiAdapter extends PiAiAdapter {
   constructor(
     private readonly catalog: WorkBuddyCatalog,
     private readonly hidden: () => readonly string[],
+    private readonly degradationMarker: () => string | undefined,
     options: ConstructorParameters<typeof PiAiAdapter>[0],
   ) {
     super(options)
@@ -438,6 +484,15 @@ class WorkBuddyPiAiAdapter extends PiAiAdapter {
   /** Catalog entry for one model id, or undefined when the catalog omits it. */
   private infoFor(model: string): WorkBuddyModelInfo | undefined {
     return this.catalog.current().find(entry => entry.id === model)
+  }
+
+  /** One picker-visible name: the catalog suffix plus the degradation marker. */
+  private displayNameFor(name: string, model: string): string {
+    const info = this.infoFor(model)
+    return withHealthMarker(
+      info === undefined ? name : withCatalogDisplay(name, info),
+      this.degradationMarker(),
+    )
   }
 
   override async listModels(provider: string): Promise<readonly LlmModelInfo[]> {
@@ -450,16 +505,12 @@ class WorkBuddyPiAiAdapter extends PiAiAdapter {
       // Selectability only — `resolveModel` below deliberately does not apply
       // this filter, so a session already using a hidden model keeps working.
       if (hidden.has(model.id)) return []
-      const info = this.infoFor(model.id)
-      if (info === undefined) return [model]
-      return [{ ...model, name: withCatalogDisplay(model.name, info) }]
+      return [{ ...model, name: this.displayNameFor(model.name, model.id) }]
     })
   }
 
   override async resolveModel(provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelInfo> {
     const resolved = await super.resolveModel(provider, model, signal)
-    const info = this.infoFor(model)
-    if (info === undefined) return resolved
-    return { ...resolved, name: withCatalogDisplay(resolved.name, info) }
+    return { ...resolved, name: this.displayNameFor(resolved.name, model) }
   }
 }

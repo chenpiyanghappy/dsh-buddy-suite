@@ -1,4 +1,6 @@
-# 已知问题与发布前待办
+# 已知问题与发布前待办（归档）
+
+> **本项目已归档**：`dsh-buddy-suite` 已停止维护，最终版本 **`0.1.3-final`**，不再发布新版本，也不承诺修复下列问题。经真机实测，非官方客户端接入 WorkBuddy 模型的方案在 WorkBuddy 2026-10-20 起的限制下**已不可行**；本插件**不声称可用，也不推荐继续沿用**，若需接入 WorkBuddy 模型请使用官方 WorkBuddy 客户端。本文件记录的是最终版本的已知状态，作为历史留存；「发布前待办」中尚未完成的事项随归档一并停止推进。支持范围见 [`COMPATIBILITY.md`](./COMPATIBILITY.md)。
 
 这份清单记录 `dsh-buddy-suite` 当前**尚未解决**的问题。按影响面排序：前两类会影响使用者，第三类是发布工作本身。
 
@@ -72,6 +74,7 @@
 | 失败信息看不懂 | 徽章直接贴上游英文原文（如 `sentinel status 400 (invalid_parameter_value): the request parameters were rejected by the model provider`），一个 pill 被撑爆且没有可执行信息 | 新增**错误诊断**：按失败阶段 + 错误码 + 上游消息归类为「请求没送达 / 登录失效 / 限流 / 上游报错 / 模型不存在 / 输出上限过低 / 上游拒绝档位 / 参数被拒」，徽章只显示短诊断，原始记录保留在气泡与状态文件里；未识别的错误不猜，回退原文 |
 | 报问题时靠人工翻文件 | 每次都要手动找探测记录、翻日志、截图 | 新增**一键复制诊断信息**：把版本、provider、目录来源、全部探测记录与原始失败原因打包成 JSON 写进剪贴板；打包时**强制剥除 `probeKey`**（进程内授权扣费的密钥），可直接贴给 Agent 或 issue |
 | 批量探测不知道要花多少 | 只提示「最多 N×8 次请求」，用户无法换算成积分 | 确认框增加**费用预估**：按目录标价算出「约 X 积分 / 最坏 Y 积分」，并对未标价的模型单独计数（不当作免费） |
+| Windows「回收 PID」保护失效 | Windows 11 已移除 `wmic`，`processStartTimeMs()` 恒为 `undefined`，`isHeartbeatProcessAlive()` 退化成「PID 存在即存活」；宿主崩溃后 PID 被无关进程复用时，CLI `status` 会把 stale heartbeat 误报成「Host running」 | Windows 分支改用 PowerShell `Get-Process .StartTime`（不依赖 `wmic`），仍格式化为 CIM_DATETIME 由 `parseWmiCreationDate` 解析；`tests/host-heartbeat.spec.ts` 新增「平台命令可 spawn 时必须返回真实启动时间」用例防回归 |
 
 ### 已验证 ✅
 
@@ -87,7 +90,7 @@
 
 ### 遗留问题 ⚠️
 
-- **本插件自带的 provider id 仍带 `-suite` 后缀**（`workbuddy-suite`）。既然它与 connect 是互斥替代关系，本可用 `workbuddy`；但改动涉及代码与测试，为不影响即将进行的提交而暂未调整，建议后续版本统一。
+- **本插件自带的 provider id 仍带 `-suite` 后缀**（`workbuddy-suite`）。既然它与 connect 是互斥替代关系，本可用 `workbuddy`；但改动涉及代码与测试，为不影响即将进行的提交而暂未调整，建议后续版本统一。（项目已归档，不再调整；本项作为历史遗留保留。）
 
 - **沙箱环境无法运行签到**。签到需要 spawn 子进程（`reg.exe` 查注册表、启动 WorkBuddy 的 Electron 取密钥），而受限环境（如本开发沙箱）会以 `EPERM` 拒绝。**这是环境限制，不是代码缺陷**，普通 DSH 运行不受影响。诊断信息会如实显示为「could not complete」而非误报「未安装」。
 
@@ -97,13 +100,16 @@
 
 - **签到仅国内版**。国际版 token 调国内签到端点返回 401，这是上游限制。
 
-- **Windows 上「回收 PID」保护失效**。`host-heartbeat.ts` 用 `wmic process ... get CreationDate` 读进程启动时间，但 Windows 11 当前版本**已移除 `wmic`**（本机实测 `wmic` 不存在），于是 `processStartTimeMs()` 恒为 `undefined`，`isHeartbeatProcessAlive()` 退化成「PID 存在即存活」。后果：宿主机崩溃后若该 PID 被无关进程复用，CLI 的 `status` 会把 stale heartbeat 误报成「Host running」。不影响插件运行与模型接入。
-  - 建议改法：Windows 分支改用 `powershell -NoProfile -Command "(Get-Process -Id <pid>).StartTime"`（或 CIM `Win32_Process.CreationDate`），保留 `parseWmiCreationDate` 作为解析器；两者输出都能落到现有的 CIM_DATETIME / 本地时间解析路径。
-  - 现状由 `tests/host-heartbeat.spec.ts` 的「degrade to PID liveness」用例如实记录，不假装强保护仍生效。
+### 0.1.3-final 新增能力的已知限制 ⚠️
+
+- **模型选择器无法真正「置灰」**：宿主暴露的 `LlmModelInfo` 只有 provider / id / name / 输入模态等字段，没有 `disabled` / `tooltip` 槽位；因此 `health=degraded/down` 时，本插件在模型名后追加短诊断（` · ⚠ degraded (CODE)` / ` · ⚠ unavailable (CODE)`），完整诊断放在卡片状态灯 tooltip 与状态 JSON 的 `lastError`（阶段 + 错误码 + 上游消息）。这是按宿主 seam 能力做的折中，不是完整实现。
+- **`doctor` 的 `upstream_changed` 只能做离线证明**：doctor 通过「桌面授权文件格式为 `unrecognized`」判定 `upstream_changed`；传输级的上游协议变更由 `status` 实时读取判定（代码注释已说明分工）。
 
 ---
 
 ## 三、发布与验证
+
+> 本节随 `0.1.3-final` 归档冻结：最终版本之后的发布工作（版本号、tag、双远端推送、npm 发布）由维护者一次性完成，下列未完成项不再推进。
 
 ### 已完成 ✅（本节旧版曾把它们误列为待办）
 
@@ -149,4 +155,4 @@ pnpm run check
 pnpm run check:offline
 ```
 
-当前状态：typecheck 通过，359 个测试通过（28 个文件），三项自检通过。
+当前状态（最终版本 `0.1.3-final`）：typecheck 通过，431 个测试通过（33 个文件），三项自检通过。项目已归档，本文件不再更新。

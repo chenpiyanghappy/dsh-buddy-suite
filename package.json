@@ -2,7 +2,7 @@
   "name": "dsh-buddy-suite",
   "displayName": "DSH Buddy Suite",
   "description": "把 WorkBuddy 桌面端的模型接入 DeepSeek Harness，并自动完成每日签到。模型接入覆盖国内版与国际版两套账号，签到覆盖本机全部国内版账号 — Bring WorkBuddy desktop models into DeepSeek Harness with automatic daily check-in: model access for both the China and international apps, check-in for every local China account.",
-  "version": "0.1.2",
+  "version": "0.1.3-final",
   "author": "chenpiyang",
   "keywords": [
     "dsh-plugin",
@@ -45,6 +45,7 @@
     "cordis.patch.yml",
     "README.md",
     "README.en.md",
+    "COMPATIBILITY.md",
     "KNOWN-ISSUES.md",
     "LICENSE",
     "NON-GOALS.md"

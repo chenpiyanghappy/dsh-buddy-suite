@@ -133,9 +133,11 @@ export function parseWmiCreationDate(value: string): number | undefined {
  * - macOS / Linux: `ps -o lstart=` prints a local-time "EEE MMM DD HH:MM:SS YYYY";
  *   `Date.parse` resolves it against the local clock, which matches how
  *   `registeredAt` (a `Date.now()` absolute value) is expressed.
- * - Windows: `wmic` prints a CIM_DATETIME `CreationDate` — local fields plus a
- *   signed minute offset (see {@link parseWmiCreationDate}); the epoch it
- *   yields is comparable to `registeredAt`.
+ * - Windows: Windows PowerShell reads the start time via `Get-Process`
+ *   (Windows 11 removed the `wmic` command this used to rely on) and formats it
+ *   back into a CIM_DATETIME string — local fields plus a signed minute offset
+ *   (see {@link parseWmiCreationDate}); the epoch it yields is comparable to
+ *   `registeredAt`.
  *
  * Failures return `undefined` so callers can fall back to plain PID liveness
  * rather than mis-report a running host as dead.
@@ -143,14 +145,30 @@ export function parseWmiCreationDate(value: string): number | undefined {
 export function processStartTimeMs(pid: number): number | undefined {
   try {
     if (process.platform === 'win32') {
+      // Windows 11 removed `wmic.exe`, so the old
+      // `wmic process ... get CreationDate` call silently yielded `undefined`,
+      // and the recycled-PID protection degraded to plain PID liveness. Read
+      // the same field through Windows PowerShell instead: `Get-Process`
+      // (part of PowerShell itself, no WMI dependency) exposes `StartTime`,
+      // which is formatted back into the CIM_DATETIME shape that
+      // `parseWmiCreationDate` already parses. The UTC offset is rendered as a
+      // signed three-digit minute count (e.g. `+480` for UTC+8).
+      const command = [
+        `$p = Get-Process -Id ${pid} -ErrorAction Stop`,
+        '$t = $p.StartTime',
+        '$off = [System.TimeZoneInfo]::Local.GetUtcOffset($t).TotalMinutes',
+        '$sign = if ($off -ge 0) { "+" } else { "-" }',
+        '$abs = [math]::Abs([int]$off)',
+        '"{0:yyyyMMddHHmmss.ffffff}{1}{2:000}" -f $t, $sign, $abs',
+      ].join('; ')
       const out = execFileSync(
-        'wmic',
-        ['process', 'where', `processid=${pid}`, 'get', 'CreationDate'],
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-Command', command],
         { encoding: 'utf8', windowsHide: true },
       )
-      // Extract the datetime token from the header/value output, then parse it
-      // strictly; a value that does not match (or no value at all) degrades to
-      // the PID-only fallback via `undefined`.
+      // Extract the datetime token from the output, then parse it strictly; a
+      // value that does not match (or no value at all) degrades to the PID-only
+      // fallback via `undefined`.
       //
       // The trailing boundary is what keeps this from laundering malformed
       // input into a well-formed token: without it `...+4800` would be
